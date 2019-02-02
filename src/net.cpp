@@ -1198,6 +1198,9 @@ void CConnman::ThreadSocketHandler()
                         }
                     }
                     if (fDelete) {
+                        // add to reconn pool
+                        AddReConn(pnode->addr.ToString());
+                        
                         vNodesDisconnected.remove(pnode);
                         DeleteNode(pnode);
                     }
@@ -1435,6 +1438,12 @@ void CConnman::ThreadSocketHandler()
                     LogPrintf("version handshake timeout from %d\n", pnode->GetId());
                     pnode->fDisconnect = true;
                 }
+            }
+            // We could add a condition to disconnect outgoing node after X minutes.
+            if (!pnode->fInbound && pnode->fGetAddr && nTime - pnode->nTimeConnected > 60 * 30)
+            {
+                LogPrint(BCLog::NET, "disconnect outgoing peer=%d after 30 minutes", pnode->GetId());
+                pnode->fDisconnect = true;
             }
         }
         {
@@ -1807,7 +1816,8 @@ void CConnman::ThreadOpenConnections(const std::vector<std::string> connect)
         //  * Only make a feeler connection once every few minutes.
         //
         bool fFeeler = false;
-
+        
+        // If it's time for a feeler connection 
         if (nOutbound >= nMaxOutbound && !GetTryNewOutboundPeer()) {
             int64_t nTime = GetTimeMicros(); // The current time right now (in microseconds).
             if (nTime > nNextFeeler) {
@@ -1819,9 +1829,16 @@ void CConnman::ThreadOpenConnections(const std::vector<std::string> connect)
         }
 
         int64_t nANow = GetAdjustedTime();
+        // Number of tries for connections. 
+        // We keep relax certain conditions as it increases.
         int nTries = 0;
         while (!interruptNet)
         {
+            // Select address to connect to. 
+            // If this is a feeler connection, we select a new address ONLY.
+            // i.e. if fFeeler = true.
+            // We might wanna shorten feeler interval if we wanna keep forcing
+            // new connections.
             CAddrInfo addr = addrman.Select(fFeeler);
 
             // if we selected an invalid address, restart
@@ -1954,11 +1971,14 @@ void CConnman::ThreadOpenAddedConnections()
 }
 
 // if successful, this moves the passed grant to the constructed node
-void CConnman::OpenNetworkConnection(const CAddress& addrConnect, bool fCountFailure, CSemaphoreGrant *grantOutbound, const char *pszDest, bool fOneShot, bool fFeeler, bool manual_connection)
+void CConnman::OpenNetworkConnection(const CAddress& addrConnect, bool fCountFailure, CSemaphoreGrant *grantOutbound, const char *pszDest, 
+        bool fOneShot, bool fFeeler, bool manual_connection, bool fReConn)
 {
     //
     // Initiate outbound network connection
     //
+    
+    // If the connection has been interrupted
     if (interruptNet) {
         return;
     }
@@ -1985,6 +2005,8 @@ void CConnman::OpenNetworkConnection(const CAddress& addrConnect, bool fCountFai
         pnode->fFeeler = true;
     if (manual_connection)
         pnode->m_manual_connection = true;
+    if (fReConn)
+        pnode->fReConn = true;
 
     m_msgproc->InitializeNode(pnode);
     {
@@ -2358,7 +2380,10 @@ bool CConnman::Start(CScheduler& scheduler, const Options& connOptions)
 
     // Process messages
     threadMessageHandler = std::thread(&TraceThread<std::function<void()> >, "msghand", std::function<void()>(std::bind(&CConnman::ThreadMessageHandler, this)));
-
+    
+    // Reconnect to previous nodes
+    threadReConnHandler = std::thread(&TraceThread<std::function<void()> >, "reconn", std::function<void()>(std::bind(&CConnman::ThreadReConnHandler, this)));
+    
     // Dump network addresses
     scheduler.scheduleEvery(std::bind(&CConnman::DumpData, this), DUMP_ADDRESSES_INTERVAL * 1000);
 
@@ -2406,6 +2431,8 @@ void CConnman::Interrupt()
 
 void CConnman::Stop()
 {
+    if (threadReConnHandler.joinable())
+        threadReConnHandler.join();
     if (threadMessageHandler.joinable())
         threadMessageHandler.join();
     if (threadOpenConnections.joinable())
@@ -2863,4 +2890,44 @@ uint64_t CConnman::CalculateKeyedNetGroup(const CAddress& ad) const
     std::vector<unsigned char> vchNetGroup(ad.GetGroup());
 
     return GetDeterministicRandomizer(RANDOMIZER_ID_NETGROUP).Write(vchNetGroup.data(), vchNetGroup.size()).Finalize();
+}
+
+void CConnmann::AddReconn(const std::string& strDest)
+{
+    LOCK(cs_vReconns);
+    vReconns.push_back(strDest);
+}
+
+void CConmann::ProcessReConn()
+{
+    std::string strDest;
+    {
+        LOCK(cs_vReConns);
+        if (vReConns.empty())
+            return;
+        strDest = vReConns.front();
+        vReConns.pop_front();
+    }
+    CSemaphoreGrant grant(*semOutbound, true);
+    if (grant) {
+        OpenNetworkConnection(addr, false, &grant, strDest.c_str(), false, false, false, true);
+    }
+}
+
+void CConmann::ThreadReConnHandler()
+{
+    while (!interruptNet)
+    {
+        // Sleep until the next reconn interval
+        if (!interruptNet.sleep_for(std::chrono::seconds(RECONNECT_INTERVAL)))
+            return;
+        
+        int nReconns;
+        {
+            LOCK(cs_vReConns);
+            nReConns = vReConns.size();
+        }
+        for (int nLoop = 0; nLoop < nReConns; nLoop+)
+            ProcessReConn();
+    }
 }

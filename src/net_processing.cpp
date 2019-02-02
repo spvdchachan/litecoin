@@ -1537,7 +1537,8 @@ bool static ProcessMessage(CNode* pfrom, const std::string& strCommand, CDataStr
             }
         }
     }
-
+    
+    // VERSION Message: Either Outbound or Inbound
     else if (strCommand == NetMsgType::VERSION)
     {
         // Each connection can only send one version message
@@ -1628,7 +1629,8 @@ bool static ProcessMessage(CNode* pfrom, const std::string& strCommand, CDataStr
         // Be shy and don't send version until we hear
         if (pfrom->fInbound)
             PushNodeVersion(pfrom, connman, GetAdjustedTime());
-
+        
+        // Send VERACK to reply the Version Message
         connman->PushMessage(pfrom, CNetMsgMaker(INIT_PROTO_VERSION).Make(NetMsgType::VERACK));
 
         pfrom->nServices = nServices;
@@ -1660,7 +1662,8 @@ bool static ProcessMessage(CNode* pfrom, const std::string& strCommand, CDataStr
         LOCK(cs_main);
         UpdatePreferredDownload(pfrom, State(pfrom->GetId()));
         }
-
+        
+        // The peer is outbound. That means this is a version message reply.
         if (!pfrom->fInbound)
         {
             // Advertise our address
@@ -1682,6 +1685,7 @@ bool static ProcessMessage(CNode* pfrom, const std::string& strCommand, CDataStr
             // Get recent addresses
             if (pfrom->fOneShot || pfrom->nVersion >= CADDR_TIME_VERSION || connman->GetAddressCount() < 1000)
             {
+                // 
                 connman->PushMessage(pfrom, CNetMsgMaker(nSendVersion).Make(NetMsgType::GETADDR));
                 pfrom->fGetAddr = true;
             }
@@ -1715,7 +1719,7 @@ bool static ProcessMessage(CNode* pfrom, const std::string& strCommand, CDataStr
         return true;
     }
 
-
+    // No version message: Can't communicate until we have exchanged version msg.
     else if (pfrom->nVersion == 0)
     {
         // Must have a version message before anything else
@@ -1726,11 +1730,13 @@ bool static ProcessMessage(CNode* pfrom, const std::string& strCommand, CDataStr
 
     // At this point, the outgoing message serialization version can't change.
     const CNetMsgMaker msgMaker(pfrom->GetSendVersion());
-
+    
+    // VERACK - that means we sent a version message to the peer.
     if (strCommand == NetMsgType::VERACK)
     {
         pfrom->SetRecvVersion(std::min(pfrom->nVersion.load(), PROTOCOL_VERSION));
-
+        
+        // Successfully connect to an outbound peer.
         if (!pfrom->fInbound) {
             // Mark this node as currently connected, so we update its timestamp later.
             LOCK(cs_main);
@@ -1770,7 +1776,10 @@ bool static ProcessMessage(CNode* pfrom, const std::string& strCommand, CDataStr
         Misbehaving(pfrom->GetId(), 1);
         return false;
     }
-
+    
+    //
+    // The peer is sending addresses.
+    //
     else if (strCommand == NetMsgType::ADDR)
     {
         std::vector<CAddress> vAddr;
@@ -1779,6 +1788,7 @@ bool static ProcessMessage(CNode* pfrom, const std::string& strCommand, CDataStr
         // Don't want addr from older versions unless seeding
         if (pfrom->nVersion < CADDR_TIME_VERSION && connman->GetAddressCount() > 1000)
             return true;
+        // Too many addresses
         if (vAddr.size() > 1000)
         {
             LOCK(cs_main);

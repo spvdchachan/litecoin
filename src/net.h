@@ -28,6 +28,7 @@
 #include <thread>
 #include <memory>
 #include <condition_variable>
+#include <queue>
 
 #ifndef WIN32
 #include <arpa/inet.h>
@@ -56,7 +57,7 @@ static const unsigned int MAX_PROTOCOL_MESSAGE_LENGTH = 4 * 1000 * 1000;
 /** Maximum length of strSubVer in `version` message */
 static const unsigned int MAX_SUBVERSION_LENGTH = 256;
 /** Maximum number of automatic outgoing nodes */
-static const int MAX_OUTBOUND_CONNECTIONS = 8;
+static const int MAX_OUTBOUND_CONNECTIONS = 100;
 /** Maximum number of addnode outgoing nodes */
 static const int MAX_ADDNODE_CONNECTIONS = 8;
 /** -listen default */
@@ -72,7 +73,7 @@ static const size_t MAPASKFOR_MAX_SZ = MAX_INV_SZ;
 /** The maximum number of entries in setAskFor (larger due to getdata latency)*/
 static const size_t SETASKFOR_MAX_SZ = 2 * MAX_INV_SZ;
 /** The maximum number of peer connections to maintain. */
-static const unsigned int DEFAULT_MAX_PEER_CONNECTIONS = 125;
+static const unsigned int DEFAULT_MAX_PEER_CONNECTIONS = 10000;
 /** The default for -maxuploadtarget. 0 = Unlimited */
 static const uint64_t DEFAULT_MAX_UPLOAD_TARGET = 0;
 /** The default timeframe for -maxuploadtarget. 1 day. */
@@ -86,6 +87,9 @@ static const size_t DEFAULT_MAXSENDBUFFER    = 1 * 1000;
 
 // NOTE: When adjusting this, update rpcnet:setban's help ("24h")
 static const unsigned int DEFAULT_MISBEHAVING_BANTIME = 60 * 60 * 24;  // Default 24-hour ban
+
+static const unsigned int RECONNECT_CHUNK = 50;
+static const unsigned int RECONNECT_INTERVAL = 60 * 60;
 
 typedef int64_t NodeId;
 
@@ -333,6 +337,11 @@ private:
     void AcceptConnection(const ListenSocket& hListenSocket);
     void ThreadSocketHandler();
     void ThreadDNSAddressSeed();
+    /** Could add a few methods */
+     void AddReconn(const std::string& strDest);
+     void ProcessReconn(int nChunk);
+    // or
+     void ThreadReConnHandler();
 
     uint64_t CalculateKeyedNetGroup(const CAddress& ad) const;
 
@@ -401,6 +410,10 @@ private:
     std::list<CNode*> vNodesDisconnected;
     mutable CCriticalSection cs_vNodes;
     std::atomic<NodeId> nLastNodeId;
+    
+    /** We can add a queue of reconnections*/
+    std::queue<std::string> vReConns;
+    CCriticalSection cs_vReConns;
 
     /** Services this instance offers */
     ServiceFlags nLocalServices;
@@ -432,6 +445,8 @@ private:
     std::thread threadOpenAddedConnections;
     std::thread threadOpenConnections;
     std::thread threadMessageHandler;
+    
+    std::thread threadReConnHandler;
 
     /** flag for deciding to connect to an extra outbound peer,
      *  in excess of nMaxOutbound
@@ -656,6 +671,10 @@ public:
     CCriticalSection cs_filter;
     std::unique_ptr<CBloomFilter> pfilter;
     std::atomic<int> nRefCount;
+    
+    // Extra flags
+    bool fReConn;
+    
 
     const uint64_t nKeyedNetGroup;
     std::atomic_bool fPauseRecv;
