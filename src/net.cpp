@@ -1442,7 +1442,7 @@ void CConnman::ThreadSocketHandler()
             // We could add a condition to disconnect outgoing node after X minutes.
             if (!pnode->fInbound && pnode->fGetAddr && nTime - pnode->nTimeConnected > 60 * 30)
             {
-                LogPrint(BCLog::NET, "disconnect outgoing peer=%d after 30 minutes", pnode->GetId());
+                LogPrint(BCLog::NET, "disconnect outgoing peer=%d after 30 minutes\n", pnode->GetId());
                 pnode->fDisconnect = true;
             }
         }
@@ -2892,13 +2892,13 @@ uint64_t CConnman::CalculateKeyedNetGroup(const CAddress& ad) const
     return GetDeterministicRandomizer(RANDOMIZER_ID_NETGROUP).Write(vchNetGroup.data(), vchNetGroup.size()).Finalize();
 }
 
-void CConnmann::AddReconn(const std::string& strDest)
+void CConnman::AddReConn(const std::string& strDest)
 {
-    LOCK(cs_vReconns);
-    vReconns.push_back(strDest);
+    LOCK(cs_vReConns);
+    vReConns.push(strDest);
 }
 
-void CConmann::ProcessReConn()
+void CConnman::ProcessReConn()
 {
     std::string strDest;
     {
@@ -2906,28 +2906,32 @@ void CConmann::ProcessReConn()
         if (vReConns.empty())
             return;
         strDest = vReConns.front();
-        vReConns.pop_front();
+        vReConns.pop();
     }
+
+    CAddress addr;
     CSemaphoreGrant grant(*semOutbound, true);
     if (grant) {
+        LogPrint(BCLog::NET, "Attempt to reconnect address %s\n", strDest);
         OpenNetworkConnection(addr, false, &grant, strDest.c_str(), false, false, false, true);
     }
 }
 
-void CConmann::ThreadReConnHandler()
+void CConnman::ThreadReConnHandler()
 {
+    LogPrintf("Reconnection Thread has started\n");
     while (!interruptNet)
     {
         // Sleep until the next reconn interval
         if (!interruptNet.sleep_for(std::chrono::seconds(RECONNECT_INTERVAL)))
             return;
         
-        int nReconns;
+        int nReConns;
         {
             LOCK(cs_vReConns);
             nReConns = vReConns.size();
         }
-        for (int nLoop = 0; nLoop < nReConns; nLoop+)
+        for (int nLoop = 0; nLoop < nReConns; nLoop++)
             ProcessReConn();
     }
 }

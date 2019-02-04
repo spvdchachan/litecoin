@@ -181,7 +181,7 @@ public:
     void Interrupt();
     bool GetNetworkActive() const { return fNetworkActive; };
     void SetNetworkActive(bool active);
-    void OpenNetworkConnection(const CAddress& addrConnect, bool fCountFailure, CSemaphoreGrant *grantOutbound = nullptr, const char *strDest = nullptr, bool fOneShot = false, bool fFeeler = false, bool manual_connection = false);
+    void OpenNetworkConnection(const CAddress& addrConnect, bool fCountFailure, CSemaphoreGrant *grantOutbound = nullptr, const char *strDest = nullptr, bool fOneShot = false, bool fFeeler = false, bool manual_connection = false, bool fReConn = false);
     bool CheckIncomingNonce(uint64_t nonce);
 
     bool ForNode(NodeId id, std::function<bool(CNode* pnode)> func);
@@ -338,10 +338,10 @@ private:
     void ThreadSocketHandler();
     void ThreadDNSAddressSeed();
     /** Could add a few methods */
-     void AddReconn(const std::string& strDest);
-     void ProcessReconn(int nChunk);
+    void AddReConn(const std::string& strDest);
+    void ProcessReConn();
     // or
-     void ThreadReConnHandler();
+    void ThreadReConnHandler();
 
     uint64_t CalculateKeyedNetGroup(const CAddress& ad) const;
 
