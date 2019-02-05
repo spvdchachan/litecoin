@@ -674,7 +674,7 @@ public:
     
     // Extra flags
     bool fReConn;
-    
+    bool fAddrRec;
 
     const uint64_t nKeyedNetGroup;
     std::atomic_bool fPauseRecv;

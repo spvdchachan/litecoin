@@ -486,7 +486,7 @@ void CNode::CloseSocketDisconnect()
     LOCK(cs_hSocket);
     if (hSocket != INVALID_SOCKET)
     {
-        LogPrint(BCLog::NET, "disconnecting peer=%d\n", id);
+        LogPrint(BCLog::NET, "disconnecting %s peer=%d address=%s\n", id, addrName, fInbound ? "inbound" : "outbound");
         CloseSocket(hSocket);
     }
 }
@@ -1440,10 +1440,19 @@ void CConnman::ThreadSocketHandler()
                 }
             }
             // We could add a condition to disconnect outgoing node after X minutes.
-            if (!pnode->fInbound && pnode->fGetAddr && nTime - pnode->nTimeConnected > 60 * 30)
+//            if ((!pnode->fInbound && nTime - pnode->nTimeConnected > 60 * 30) || pnode->fGetAddr)
+//            {
+//                LogPrint(BCLog::NET, "Passive: disconnecting outbound peer=%d after receiving addresses\n", pnode->GetId());
+//                pnode->fDisconnect = true;
+//            }
+            // Disconnect a peer after we receive addresses
+            if (pnode->fGetAddr && pnode->fAddrRec)
             {
-                LogPrint(BCLog::NET, "disconnect outgoing peer=%d after 30 minutes\n", pnode->GetId());
-                pnode->fDisconnect = true;
+                LogPrint(BCLog::NET, "Passive: disconnecting %s peer=%d addr=%s after receiving addresses duration=%d\n", 
+                        pnode->fInbound ? "inbound" : "outbound",
+                        pnode->GetId(),
+                        pnode->addr.ToString(),
+                        nTime - pnode->nTimeConnected);
             }
         }
         {
@@ -2912,7 +2921,7 @@ void CConnman::ProcessReConn()
     CAddress addr;
     CSemaphoreGrant grant(*semOutbound, true);
     if (grant) {
-        LogPrint(BCLog::NET, "Attempt to reconnect address %s\n", strDest);
+        LogPrint(BCLog::NET, "Passive: attempting to reconnect address=%s\n", strDest);
         OpenNetworkConnection(addr, false, &grant, strDest.c_str(), false, false, false, true);
     }
 }

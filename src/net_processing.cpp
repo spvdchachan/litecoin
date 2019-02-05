@@ -1829,6 +1829,7 @@ bool static ProcessMessage(CNode* pfrom, const std::string& strCommand, CDataStr
             pfrom->fGetAddr = false;
         if (pfrom->fOneShot)
             pfrom->fDisconnect = true;
+        pfrom->fAddrRec = true;
     }
 
     else if (strCommand == NetMsgType::SENDHEADERS)
