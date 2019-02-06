@@ -143,3 +143,18 @@ bool CAddrDB::Read(CAddrMan& addr, CDataStream& ssPeers)
     }
     return ret;
 }
+
+CReconnDB::CReconnDB()
+{
+    pathReconn = GetDataDir() / "reconns.dat";
+}
+
+bool CReconnDB::Write(const reconn_queue_t& reconnQueue)
+{
+    return SerializeFileDB("reconns", pathReconn, reconnQueue);
+}
+
+bool CReconnDB::Read(reconn_queue_t& reconnQueue)
+{
+    return DeserializeFileDB(pathReconn, reconnQueue);
+}

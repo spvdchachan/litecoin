@@ -7,10 +7,12 @@
 #define BITCOIN_ADDRDB_H
 
 #include <fs.h>
-#include <serialize.h>
+#include <utiltime.h>
+#include <protocol.h>
 
 #include <string>
 #include <map>
+#include <vector>
 
 class CSubNet;
 class CAddrMan;
@@ -97,6 +99,68 @@ public:
     CBanDB();
     bool Write(const banmap_t& banSet);
     bool Read(banmap_t& banSet);
+};
+
+// PASSIVE
+/** Extends statistics regarding reconnections on CAddress */
+class CReconnAddr : public CAddress
+{
+public:
+    //! last connection time
+    int64_t nLastSeen;
+    
+private:
+    //! when it was created - would like this to be const but don't want to mess around with low-level serialization
+    int64_t nCreatedTime;
+    
+public:
+    
+    ADD_SERIALIZE_METHODS;
+    
+    template <typename Stream, typename Operation>
+    inline void SerializationOp(Stream& s, Operation ser_action){
+        READWRITE(*(CAddress*)this);
+        READWRITE(nCreatedTime);
+        READWRITE(nLastSeen);
+    }
+    
+    void Init()
+    {
+        nCreatedTime = GetSystemTimeInSeconds();
+    }
+    
+    CReconnAddr(const CAddress &addrIn, int64_t nLastSeen) : 
+        CAddress(addrIn),
+        nLastSeen(nLastSeen)
+    {
+        Init();
+    }
+    
+    CReconnAddr(const CAddress &addrIn) :
+        CAddress(addrIn),
+        nLastSeen(GetSystemTimeInSeconds())
+    {
+        Init();
+    }
+    
+    CReconnAddr() : CAddress(), nLastSeen(GetSystemTimeInSeconds())
+    {
+        Init();
+    }
+    
+};
+
+typedef std::vector<CReconnAddr> reconn_queue_t;
+
+/** Access to the reconn address database (reconns.dat) */
+class CReconnDB
+{
+private:
+    fs::path pathReconn;
+public:
+    CReconnDB();
+    bool Write(const reconn_queue_t& reconnQueue);
+    bool Read(reconn_queue_t& reconnQueue);
 };
 
 #endif // BITCOIN_ADDRDB_H

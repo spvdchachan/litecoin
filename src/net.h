@@ -181,7 +181,7 @@ public:
     void Interrupt();
     bool GetNetworkActive() const { return fNetworkActive; };
     void SetNetworkActive(bool active);
-    void OpenNetworkConnection(const CAddress& addrConnect, bool fCountFailure, CSemaphoreGrant *grantOutbound = nullptr, const char *strDest = nullptr, bool fOneShot = false, bool fFeeler = false, bool manual_connection = false, bool fReConn = false);
+    void OpenNetworkConnection(const CAddress& addrConnect, bool fCountFailure, CSemaphoreGrant *grantOutbound = nullptr, const char *strDest = nullptr, bool fOneShot = false, bool fFeeler = false, bool manual_connection = false, bool fReconn = false);
     bool CheckIncomingNonce(uint64_t nonce);
 
     bool ForNode(NodeId id, std::function<bool(CNode* pnode)> func);
@@ -337,11 +337,12 @@ private:
     void AcceptConnection(const ListenSocket& hListenSocket);
     void ThreadSocketHandler();
     void ThreadDNSAddressSeed();
-    /** Could add a few methods */
-    void AddReConn(const std::string& strDest);
-    void ProcessReConn();
-    // or
-    void ThreadReConnHandler();
+    // PASSIVE
+    void AddReconn(const CAddress& addr);
+    void ProcessReconn();
+    void GetReconns(reconn_queue_t &reconns);
+    void SetReconns(const reconn_queue_t &reconns);
+    void ThreadReconnHandler();
 
     uint64_t CalculateKeyedNetGroup(const CAddress& ad) const;
 
@@ -368,6 +369,13 @@ private:
     void DumpAddresses();
     void DumpData();
     void DumpBanlist();
+    // PASSIVE
+    void DumpReconns();
+    bool ReconnsDirty();
+    void SetReconnsDirty(bool dirty=true);
+    // TODO
+//    void RemoveStale();
+//    void RemoveDuplicates();
 
     // Network stats
     void RecordBytesRecv(uint64_t bytes);
@@ -411,9 +419,11 @@ private:
     mutable CCriticalSection cs_vNodes;
     std::atomic<NodeId> nLastNodeId;
     
-    /** We can add a queue of reconnections*/
-    std::queue<std::string> vReConns;
-    CCriticalSection cs_vReConns;
+    // PASSIVE
+    /** We can add a queue of reconnections */
+    reconn_queue_t vReconns;
+    CCriticalSection cs_vReconns;
+    bool fReconnsDirty;
 
     /** Services this instance offers */
     ServiceFlags nLocalServices;
@@ -445,8 +455,8 @@ private:
     std::thread threadOpenAddedConnections;
     std::thread threadOpenConnections;
     std::thread threadMessageHandler;
-    
-    std::thread threadReConnHandler;
+    // PASSIVE
+    std::thread threadReconnHandler;
 
     /** flag for deciding to connect to an extra outbound peer,
      *  in excess of nMaxOutbound
@@ -673,7 +683,7 @@ public:
     std::atomic<int> nRefCount;
     
     // Extra flags
-    bool fReConn;
+    bool fReconn;
     bool fAddrRec;
 
     const uint64_t nKeyedNetGroup;

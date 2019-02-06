@@ -1198,8 +1198,12 @@ void CConnman::ThreadSocketHandler()
                         }
                     }
                     if (fDelete) {
-                        // add to reconn pool
-                        AddReConn(pnode->addr.ToString());
+                        // PASSIVE
+                        // TODO: Optimize this process
+                        // add to reconn pool if it's not in there
+                        // i.e. this is not a reconn. But what about inbound?
+                        if (!pnode->fReconn && !pnode->fInbound)
+                            AddReconn(pnode->addr);
                         
                         vNodesDisconnected.remove(pnode);
                         DeleteNode(pnode);
@@ -1439,6 +1443,7 @@ void CConnman::ThreadSocketHandler()
                     pnode->fDisconnect = true;
                 }
             }
+            // PASSIVE
             // We could add a condition to disconnect outgoing node after X minutes.
 //            if ((!pnode->fInbound && nTime - pnode->nTimeConnected > 60 * 30) || pnode->fGetAddr)
 //            {
@@ -1448,10 +1453,11 @@ void CConnman::ThreadSocketHandler()
             // Disconnect a peer after we receive addresses
             if (pnode->fGetAddr && pnode->fAddrRec)
             {
-                LogPrint(BCLog::NET, "Passive: disconnecting %s peer=%d addr=%s after receiving addresses duration=%d\n", 
+                LogPrint(BCLog::NET, "Passive: disconnecting %s peer=%d addr=%s reconn=%s duration=%d (after receiving addresses) \n", 
                         pnode->fInbound ? "inbound" : "outbound",
                         pnode->GetId(),
                         pnode->addr.ToString(),
+                        pnode->fReconn ? "true" : "false",
                         nTime - pnode->nTimeConnected);
             }
         }
@@ -1685,6 +1691,7 @@ void CConnman::DumpAddresses()
 
 void CConnman::DumpData()
 {
+    DumpReconns();
     DumpAddresses();
     DumpBanlist();
 }
@@ -1981,7 +1988,7 @@ void CConnman::ThreadOpenAddedConnections()
 
 // if successful, this moves the passed grant to the constructed node
 void CConnman::OpenNetworkConnection(const CAddress& addrConnect, bool fCountFailure, CSemaphoreGrant *grantOutbound, const char *pszDest, 
-        bool fOneShot, bool fFeeler, bool manual_connection, bool fReConn)
+        bool fOneShot, bool fFeeler, bool manual_connection, bool fReconn)
 {
     //
     // Initiate outbound network connection
@@ -2014,8 +2021,8 @@ void CConnman::OpenNetworkConnection(const CAddress& addrConnect, bool fCountFai
         pnode->fFeeler = true;
     if (manual_connection)
         pnode->m_manual_connection = true;
-    if (fReConn)
-        pnode->fReConn = true;
+    if (fReconn)
+        pnode->fReconn = true;
 
     m_msgproc->InitializeNode(pnode);
     {
@@ -2338,6 +2345,22 @@ bool CConnman::Start(CScheduler& scheduler, const Options& connOptions)
         SetBannedSetDirty(true); // force write
         DumpBanlist();
     }
+    // PASSIVE
+    // Load addresses from reconns.dat
+    nStart = GetTimeMillis();
+    CReconnDB reconndb;
+    reconn_queue_t reconns;
+    if (reconndb.Read(reconns)) {
+        SetReconns(reconns);
+        SetReconnsDirty(false);
+        
+        LogPrint(BCLog::NET, "Passive: Loaded %d reconn nodes from reconns.dat %dms\n",
+            reconns.size(), GetTimeMillis() - nStart);
+    } else {
+        LogPrintf("Invalid or missing reconns.dat; recreating\n");
+        SetReconnsDirty(true);
+        DumpReconns();
+    }
 
     uiInterface.InitMessage(_("Starting network threads..."));
 
@@ -2391,7 +2414,7 @@ bool CConnman::Start(CScheduler& scheduler, const Options& connOptions)
     threadMessageHandler = std::thread(&TraceThread<std::function<void()> >, "msghand", std::function<void()>(std::bind(&CConnman::ThreadMessageHandler, this)));
     
     // Reconnect to previous nodes
-    threadReConnHandler = std::thread(&TraceThread<std::function<void()> >, "reconn", std::function<void()>(std::bind(&CConnman::ThreadReConnHandler, this)));
+    threadReconnHandler = std::thread(&TraceThread<std::function<void()> >, "reconn", std::function<void()>(std::bind(&CConnman::ThreadReconnHandler, this)));
     
     // Dump network addresses
     scheduler.scheduleEvery(std::bind(&CConnman::DumpData, this), DUMP_ADDRESSES_INTERVAL * 1000);
@@ -2440,8 +2463,8 @@ void CConnman::Interrupt()
 
 void CConnman::Stop()
 {
-    if (threadReConnHandler.joinable())
-        threadReConnHandler.join();
+    if (threadReconnHandler.joinable())
+        threadReconnHandler.join();
     if (threadMessageHandler.joinable())
         threadMessageHandler.join();
     if (threadOpenConnections.joinable())
@@ -2901,32 +2924,78 @@ uint64_t CConnman::CalculateKeyedNetGroup(const CAddress& ad) const
     return GetDeterministicRandomizer(RANDOMIZER_ID_NETGROUP).Write(vchNetGroup.data(), vchNetGroup.size()).Finalize();
 }
 
-void CConnman::AddReConn(const std::string& strDest)
+// PASSIVE
+void CConnman::AddReconn(const CAddress& addr)
 {
-    LOCK(cs_vReConns);
-    vReConns.push(strDest);
+    LOCK(cs_vReconns);
+    CReconnAddr reAddr(addr);
+    vReconns.push_back(reAddr);
+    fReconnsDirty = true;
 }
 
-void CConnman::ProcessReConn()
+void CConnman::ProcessReconn()
 {
-    std::string strDest;
+    CReconnAddr reAddr;
     {
-        LOCK(cs_vReConns);
-        if (vReConns.empty())
+        LOCK(cs_vReconns);
+        if (vReconns.empty())
             return;
-        strDest = vReConns.front();
-        vReConns.pop();
+        reAddr = vReconns.front();
+        // TODO: Will Change to current index
+        // Rotate is fast but not O(1)
+        std::rotate(vReconns.begin(), vReconns.begin()+1, vReconns.end());
     }
-
-    CAddress addr;
+    
     CSemaphoreGrant grant(*semOutbound, true);
     if (grant) {
-        LogPrint(BCLog::NET, "Passive: attempting to reconnect address=%s\n", strDest);
-        OpenNetworkConnection(addr, false, &grant, strDest.c_str(), false, false, false, true);
+        LogPrint(BCLog::NET, "Passive: attempting to reconnect address=%s\n", reAddr.ToString());
+        OpenNetworkConnection((CAddress) reAddr, false, &grant, nullptr, false, false, false, true);
     }
 }
 
-void CConnman::ThreadReConnHandler()
+bool CConnman::ReconnsDirty()
+{
+    LOCK(cs_vReconns);
+    return fReconnsDirty;
+}
+
+void CConnman::SetReconnsDirty(bool dirty)
+{
+    LOCK(cs_vReconns);
+    fReconnsDirty = dirty;
+}
+
+void CConnman::GetReconns(reconn_queue_t& reconns)
+{
+    LOCK(cs_vReconns);
+    // Thread-safe copy
+    reconns = vReconns;
+}
+
+void CConnman::SetReconns(const reconn_queue_t& reconns)
+{
+    LOCK(cs_vReconns);
+    vReconns = reconns;
+    fReconnsDirty = true;
+}
+
+void CConnman::DumpReconns()
+{
+    if (!ReconnsDirty())
+        return;
+    
+    int64_t nStart = GetTimeMillis();
+    CReconnDB reconndb;
+    reconn_queue_t reconns;
+    GetReconns(reconns);
+    if (reconndb.Write(reconns))
+        SetReconnsDirty(false);
+    
+    LogPrint(BCLog::NET, "Passive: flushed %d reconn nodes to reconns.dat %dms\n",
+        reconns.size(), GetTimeMillis() - nStart);
+}
+
+void CConnman::ThreadReconnHandler()
 {
     LogPrintf("Reconnection Thread has started\n");
     while (!interruptNet)
@@ -2935,12 +3004,12 @@ void CConnman::ThreadReConnHandler()
         if (!interruptNet.sleep_for(std::chrono::seconds(RECONNECT_INTERVAL)))
             return;
         
-        int nReConns;
+        int nReconns;
         {
-            LOCK(cs_vReConns);
-            nReConns = vReConns.size();
+            LOCK(cs_vReconns);
+            nReconns = vReconns.size();
         }
-        for (int nLoop = 0; nLoop < nReConns; nLoop++)
-            ProcessReConn();
+        for (int nLoop = 0; nLoop < nReconns; nLoop++)
+            ProcessReconn();
     }
 }
