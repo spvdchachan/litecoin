@@ -86,6 +86,9 @@ const char * const BITCOIN_CONF_FILENAME = "litecoin.conf";
 const char * const BITCOIN_PID_FILENAME = "litecoind.pid";
 const char * const DEFAULT_DEBUGLOGFILE = "debug.log";
 
+// PASSIVE
+const char * const PASSIVE_LOGFILE = "passive.log";
+
 ArgsManager gArgs;
 bool fPrintToConsole = false;
 bool fPrintToDebugLog = true;

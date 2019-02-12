@@ -149,12 +149,12 @@ CReconnDB::CReconnDB()
     pathReconn = GetDataDir() / "reconns.dat";
 }
 
-bool CReconnDB::Write(const reconn_queue_t& reconnQueue)
+bool CReconnDB::Write(const reconnmap_t& reconnMap)
 {
-    return SerializeFileDB("reconns", pathReconn, reconnQueue);
+    return SerializeFileDB("reconns", pathReconn, reconnMap);
 }
 
-bool CReconnDB::Read(reconn_queue_t& reconnQueue)
+bool CReconnDB::Read(reconnmap_t& reconnMap)
 {
-    return DeserializeFileDB(pathReconn, reconnQueue);
+    return DeserializeFileDB(pathReconn, reconnMap);
 }

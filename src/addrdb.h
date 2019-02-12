@@ -12,7 +12,6 @@
 
 #include <string>
 #include <map>
-#include <vector>
 
 class CSubNet;
 class CAddrMan;
@@ -108,6 +107,7 @@ class CReconnAddr : public CAddress
 public:
     //! last connection time
     int64_t nLastSeen;
+    int64_t nSuccesses;
     
 private:
     //! when it was created - would like this to be const but don't want to mess around with low-level serialization
@@ -122,11 +122,13 @@ public:
         READWRITE(*(CAddress*)this);
         READWRITE(nCreatedTime);
         READWRITE(nLastSeen);
+        READWRITE(nSuccesses);
     }
     
     void Init()
     {
         nCreatedTime = GetSystemTimeInSeconds();
+        nSuccesses = 0;
     }
     
     CReconnAddr(const CAddress &addrIn, int64_t nLastSeen) : 
@@ -150,7 +152,7 @@ public:
     
 };
 
-typedef std::vector<CReconnAddr> reconn_queue_t;
+typedef std::map<CNetAddr, CReconnAddr> reconnmap_t;
 
 /** Access to the reconn address database (reconns.dat) */
 class CReconnDB
@@ -159,8 +161,8 @@ private:
     fs::path pathReconn;
 public:
     CReconnDB();
-    bool Write(const reconn_queue_t& reconnQueue);
-    bool Read(reconn_queue_t& reconnQueue);
+    bool Write(const reconnmap_t& reconnMap);
+    bool Read(reconnmap_t& reconnMap);
 };
 
 #endif // BITCOIN_ADDRDB_H

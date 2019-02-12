@@ -486,7 +486,7 @@ void CNode::CloseSocketDisconnect()
     LOCK(cs_hSocket);
     if (hSocket != INVALID_SOCKET)
     {
-        LogPrint(BCLog::NET, "disconnecting %s peer=%d address=%s\n", id, addrName, fInbound ? "inbound" : "outbound");
+        LogPrint(BCLog::NET, "disconnecting %s peer=%d address=%s reconn=%s\n", fInbound ? "inbound" : "outbound", id, addrName, fReconn ? "true" : "false");
         CloseSocket(hSocket);
     }
 }
@@ -1141,7 +1141,7 @@ void CConnman::AcceptConnection(const ListenSocket& hListenSocket) {
     pnode->fWhitelisted = whitelisted;
     m_msgproc->InitializeNode(pnode);
 
-    LogPrint(BCLog::NET, "connection from %s accepted\n", addr.ToString());
+    LogPrint(BCLog::NET, "inbound connection from address=%s accepted\n", addr.ToString());
 
     {
         LOCK(cs_vNodes);
@@ -1199,11 +1199,7 @@ void CConnman::ThreadSocketHandler()
                     }
                     if (fDelete) {
                         // PASSIVE
-                        // TODO: Optimize this process
-                        // add to reconn pool if it's not in there
-                        // i.e. this is not a reconn. But what about inbound?
-                        if (!pnode->fReconn && !pnode->fInbound)
-                            AddReconn(pnode->addr);
+                        AddReconn(pnode->addr);
                         
                         vNodesDisconnected.remove(pnode);
                         DeleteNode(pnode);
@@ -1415,50 +1411,48 @@ void CConnman::ThreadSocketHandler()
             // Inactivity checking
             //
             int64_t nTime = GetSystemTimeInSeconds();
+            //  PASSIVE
+            std::ostringstream ss;
+            ss << "disconnecting " << (pnode->fInbound ? "inbound" : "outbound") 
+                    << " addr=" << pnode->addr.ToString() 
+                    << " reconn=" << (pnode->fReconn ? "true": "false");
+            std::string disconnectInfo = SanitizeString(ss.str());
             if (nTime - pnode->nTimeConnected > 60)
             {
                 if (pnode->nLastRecv == 0 || pnode->nLastSend == 0)
                 {
-                    LogPrint(BCLog::NET, "socket no message in first 60 seconds, %d %d from %d\n", pnode->nLastRecv != 0, pnode->nLastSend != 0, pnode->GetId());
+                    LogPrint(BCLog::NET, "%s socket no message in first 60 seconds, %d %d from %d\n", 
+                            disconnectInfo, pnode->nLastRecv != 0, pnode->nLastSend != 0, pnode->GetId());
                     pnode->fDisconnect = true;
                 }
                 else if (nTime - pnode->nLastSend > TIMEOUT_INTERVAL)
                 {
-                    LogPrintf("socket sending timeout: %is\n", nTime - pnode->nLastSend);
+                    LogPrintf("%s socket sending timeout: %is\n", disconnectInfo, nTime - pnode->nLastSend);
                     pnode->fDisconnect = true;
                 }
                 else if (nTime - pnode->nLastRecv > (pnode->nVersion > BIP0031_VERSION ? TIMEOUT_INTERVAL : 90*60))
                 {
-                    LogPrintf("socket receive timeout: %is\n", nTime - pnode->nLastRecv);
+                    LogPrintf("%s socket receive timeout: %is\n", disconnectInfo, nTime - pnode->nLastRecv);
                     pnode->fDisconnect = true;
                 }
                 else if (pnode->nPingNonceSent && pnode->nPingUsecStart + TIMEOUT_INTERVAL * 1000000 < GetTimeMicros())
                 {
-                    LogPrintf("ping timeout: %fs\n", 0.000001 * (GetTimeMicros() - pnode->nPingUsecStart));
+                    LogPrintf("%s ping timeout: %fs\n", disconnectInfo, 0.000001 * (GetTimeMicros() - pnode->nPingUsecStart));
                     pnode->fDisconnect = true;
                 }
                 else if (!pnode->fSuccessfullyConnected)
                 {
-                    LogPrintf("version handshake timeout from %d\n", pnode->GetId());
+                    LogPrintf("%s version handshake timeout from %d\n", disconnectInfo, pnode->GetId());
                     pnode->fDisconnect = true;
                 }
             }
             // PASSIVE
-            // We could add a condition to disconnect outgoing node after X minutes.
-//            if ((!pnode->fInbound && nTime - pnode->nTimeConnected > 60 * 30) || pnode->fGetAddr)
-//            {
-//                LogPrint(BCLog::NET, "Passive: disconnecting outbound peer=%d after receiving addresses\n", pnode->GetId());
-//                pnode->fDisconnect = true;
-//            }
             // Disconnect a peer after we receive addresses
             if (pnode->fGetAddr && pnode->fAddrRec)
             {
-                LogPrint(BCLog::NET, "Passive: disconnecting %s peer=%d addr=%s reconn=%s duration=%d (after receiving addresses) \n", 
-                        pnode->fInbound ? "inbound" : "outbound",
-                        pnode->GetId(),
-                        pnode->addr.ToString(),
-                        pnode->fReconn ? "true" : "false",
+                LogPrint(BCLog::NET, "Passive: %s duration=%d (after receiving addresses) \n", disconnectInfo,
                         nTime - pnode->nTimeConnected);
+                pnode->fDisconnect = true;
             }
         }
         {
@@ -2029,6 +2023,7 @@ void CConnman::OpenNetworkConnection(const CAddress& addrConnect, bool fCountFai
         LOCK(cs_vNodes);
         vNodes.push_back(pnode);
     }
+    LogPrint(BCLog::NET, "Passive: successfully connect to outbound address=%s reconn=%s\n", addrConnect.ToString(), fReconn ? "true" : "false");
 }
 
 void CConnman::ThreadMessageHandler()
@@ -2349,12 +2344,12 @@ bool CConnman::Start(CScheduler& scheduler, const Options& connOptions)
     // Load addresses from reconns.dat
     nStart = GetTimeMillis();
     CReconnDB reconndb;
-    reconn_queue_t reconns;
+    reconnmap_t reconns;
     if (reconndb.Read(reconns)) {
         SetReconns(reconns);
         SetReconnsDirty(false);
         
-        LogPrint(BCLog::NET, "Passive: Loaded %d reconn nodes from reconns.dat %dms\n",
+        LogPrint(BCLog::NET, "Passive: Loaded %d reconn addrs from reconns.dat %dms\n",
             reconns.size(), GetTimeMillis() - nStart);
     } else {
         LogPrintf("Invalid or missing reconns.dat; recreating\n");
@@ -2413,7 +2408,7 @@ bool CConnman::Start(CScheduler& scheduler, const Options& connOptions)
     // Process messages
     threadMessageHandler = std::thread(&TraceThread<std::function<void()> >, "msghand", std::function<void()>(std::bind(&CConnman::ThreadMessageHandler, this)));
     
-    // Reconnect to previous nodes
+    // Reconnect to previous addrs
     threadReconnHandler = std::thread(&TraceThread<std::function<void()> >, "reconn", std::function<void()>(std::bind(&CConnman::ThreadReconnHandler, this)));
     
     // Dump network addresses
@@ -2928,28 +2923,39 @@ uint64_t CConnman::CalculateKeyedNetGroup(const CAddress& ad) const
 void CConnman::AddReconn(const CAddress& addr)
 {
     LOCK(cs_vReconns);
-    CReconnAddr reAddr(addr);
-    vReconns.push_back(reAddr);
+    auto it = vReconns.find(addr);
+    if(it != vReconns.end())
+    {
+        // Safe: Since we are sure that it exists inside the map.
+        CReconnAddr& reAddr = it->second;
+        reAddr.nLastSeen = GetSystemTimeInSeconds();
+    }
+    else
+    {
+        CReconnAddr reAddr(addr);
+        vReconns[addr] = reAddr;
+    }
     fReconnsDirty = true;
 }
 
-void CConnman::ProcessReconn()
+void CConnman::ProcessReconns()
 {
-    CReconnAddr reAddr;
+    LOCK(cs_vReconns);
+    for (auto& kv : vReconns)
     {
-        LOCK(cs_vReconns);
-        if (vReconns.empty())
-            return;
-        reAddr = vReconns.front();
-        // TODO: Will Change to current index
-        // Rotate is fast but not O(1)
-        std::rotate(vReconns.begin(), vReconns.begin()+1, vReconns.end());
-    }
-    
-    CSemaphoreGrant grant(*semOutbound, true);
-    if (grant) {
-        LogPrint(BCLog::NET, "Passive: attempting to reconnect address=%s\n", reAddr.ToString());
-        OpenNetworkConnection((CAddress) reAddr, false, &grant, nullptr, false, false, false, true);
+        CReconnAddr& reAddr = kv.second;
+        CSemaphoreGrant grant(*semOutbound, true);
+        if (grant) {
+            LogPrint(BCLog::NET, "Passive: attempting to reconnect address=%s lastseen=%.1fhrs successes=%d\n", 
+                    reAddr.ToString(),
+                    (double) (GetAdjustedTime()-reAddr.nLastSeen) / 3600.0,
+                    reAddr.nSuccesses);
+            OpenNetworkConnection((CAddress) reAddr, false, &grant, nullptr, false, false, false, true);
+        }
+             
+        // If successful
+        if (FindNode(kv.first) != nullptr)
+            reAddr.nSuccesses += 1;
     }
 }
 
@@ -2965,14 +2971,14 @@ void CConnman::SetReconnsDirty(bool dirty)
     fReconnsDirty = dirty;
 }
 
-void CConnman::GetReconns(reconn_queue_t& reconns)
+void CConnman::GetReconns(reconnmap_t& reconns)
 {
     LOCK(cs_vReconns);
     // Thread-safe copy
     reconns = vReconns;
 }
 
-void CConnman::SetReconns(const reconn_queue_t& reconns)
+void CConnman::SetReconns(const reconnmap_t& reconns)
 {
     LOCK(cs_vReconns);
     vReconns = reconns;
@@ -2986,12 +2992,12 @@ void CConnman::DumpReconns()
     
     int64_t nStart = GetTimeMillis();
     CReconnDB reconndb;
-    reconn_queue_t reconns;
+    reconnmap_t reconns;
     GetReconns(reconns);
     if (reconndb.Write(reconns))
         SetReconnsDirty(false);
     
-    LogPrint(BCLog::NET, "Passive: flushed %d reconn nodes to reconns.dat %dms\n",
+    LogPrint(BCLog::NET, "Passive: flushed %d reconn addrs to reconns.dat %dms\n",
         reconns.size(), GetTimeMillis() - nStart);
 }
 
@@ -3004,12 +3010,6 @@ void CConnman::ThreadReconnHandler()
         if (!interruptNet.sleep_for(std::chrono::seconds(RECONNECT_INTERVAL)))
             return;
         
-        int nReconns;
-        {
-            LOCK(cs_vReconns);
-            nReconns = vReconns.size();
-        }
-        for (int nLoop = 0; nLoop < nReconns; nLoop++)
-            ProcessReconn();
+        ProcessReconns();
     }
 }

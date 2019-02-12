@@ -57,7 +57,7 @@ static const unsigned int MAX_PROTOCOL_MESSAGE_LENGTH = 4 * 1000 * 1000;
 /** Maximum length of strSubVer in `version` message */
 static const unsigned int MAX_SUBVERSION_LENGTH = 256;
 /** Maximum number of automatic outgoing nodes */
-static const int MAX_OUTBOUND_CONNECTIONS = 100;
+static const int MAX_OUTBOUND_CONNECTIONS = 5000;
 /** Maximum number of addnode outgoing nodes */
 static const int MAX_ADDNODE_CONNECTIONS = 8;
 /** -listen default */
@@ -73,7 +73,7 @@ static const size_t MAPASKFOR_MAX_SZ = MAX_INV_SZ;
 /** The maximum number of entries in setAskFor (larger due to getdata latency)*/
 static const size_t SETASKFOR_MAX_SZ = 2 * MAX_INV_SZ;
 /** The maximum number of peer connections to maintain. */
-static const unsigned int DEFAULT_MAX_PEER_CONNECTIONS = 10000;
+static const unsigned int DEFAULT_MAX_PEER_CONNECTIONS = 100000;
 /** The default for -maxuploadtarget. 0 = Unlimited */
 static const uint64_t DEFAULT_MAX_UPLOAD_TARGET = 0;
 /** The default timeframe for -maxuploadtarget. 1 day. */
@@ -88,8 +88,8 @@ static const size_t DEFAULT_MAXSENDBUFFER    = 1 * 1000;
 // NOTE: When adjusting this, update rpcnet:setban's help ("24h")
 static const unsigned int DEFAULT_MISBEHAVING_BANTIME = 60 * 60 * 24;  // Default 24-hour ban
 
-static const unsigned int RECONNECT_CHUNK = 50;
-static const unsigned int RECONNECT_INTERVAL = 60 * 60;
+// PASSIVE
+static const unsigned int RECONNECT_INTERVAL = 60 * 30;
 
 typedef int64_t NodeId;
 
@@ -339,9 +339,10 @@ private:
     void ThreadDNSAddressSeed();
     // PASSIVE
     void AddReconn(const CAddress& addr);
-    void ProcessReconn();
-    void GetReconns(reconn_queue_t &reconns);
-    void SetReconns(const reconn_queue_t &reconns);
+//    void ReconnSuccess(const CAddress& addr);
+    void ProcessReconns();
+    void GetReconns(reconnmap_t &reconns);
+    void SetReconns(const reconnmap_t &reconns);
     void ThreadReconnHandler();
 
     uint64_t CalculateKeyedNetGroup(const CAddress& ad) const;
@@ -375,7 +376,6 @@ private:
     void SetReconnsDirty(bool dirty=true);
     // TODO
 //    void RemoveStale();
-//    void RemoveDuplicates();
 
     // Network stats
     void RecordBytesRecv(uint64_t bytes);
@@ -421,7 +421,7 @@ private:
     
     // PASSIVE
     /** We can add a queue of reconnections */
-    reconn_queue_t vReconns;
+    reconnmap_t vReconns;
     CCriticalSection cs_vReconns;
     bool fReconnsDirty;
 
@@ -682,6 +682,7 @@ public:
     std::unique_ptr<CBloomFilter> pfilter;
     std::atomic<int> nRefCount;
     
+    // PASSIVE
     // Extra flags
     bool fReconn;
     bool fAddrRec;
