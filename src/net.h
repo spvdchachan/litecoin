@@ -8,6 +8,7 @@
 
 #include <addrdb.h>
 #include <addrman.h>
+#include <paddrman.h>
 #include <amount.h>
 #include <bloom.h>
 #include <compat.h>
