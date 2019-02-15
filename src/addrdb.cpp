@@ -9,6 +9,7 @@
 #include <chainparams.h>
 #include <clientversion.h>
 #include <hash.h>
+#include <paddrman.h>
 #include <random.h>
 #include <streams.h>
 #include <tinyformat.h>
@@ -139,6 +140,30 @@ bool CAddrDB::Read(CAddrMan& addr, CDataStream& ssPeers)
     bool ret = DeserializeDB(ssPeers, addr, false);
     if (!ret) {
         // Ensure addrman is left in a clean state
+        addr.Clear();
+    }
+    return ret;
+}
+
+CPAddrDB::CPAddrDB()
+{
+    pathAddr = GetDataDir() / "passive_peers.dat";
+}
+
+bool CPAddrDB::Write(const CPAddrMan& addr)
+{
+    return SerializeFileDB("passive_peers", pathAddr, addr);
+}
+
+bool CPAddrDB::Read(CPAddrMan& addr)
+{
+    return DeserializeFileDB(pathAddr, addr);
+}
+
+bool CPAddrDB::Read(CPAddrMan& addr, CDataStream& ssPeers)
+{
+    bool ret = DeserializeDB(ssPeers, addr, false);
+    if (!ret) {
         addr.Clear();
     }
     return ret;

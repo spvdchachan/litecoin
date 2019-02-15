@@ -8,13 +8,13 @@
 
 #include <addrdb.h>
 #include <addrman.h>
-#include <paddrman.h>
 #include <amount.h>
 #include <bloom.h>
 #include <compat.h>
 #include <hash.h>
 #include <limitedmap.h>
 #include <netaddress.h>
+#include <paddrman.h>
 #include <policy/feerate.h>
 #include <protocol.h>
 #include <random.h>
@@ -90,7 +90,9 @@ static const size_t DEFAULT_MAXSENDBUFFER    = 1 * 1000;
 static const unsigned int DEFAULT_MISBEHAVING_BANTIME = 60 * 60 * 24;  // Default 24-hour ban
 
 // PASSIVE
-static const unsigned int RECONNECT_INTERVAL = 60 * 30;
+static const unsigned int DEFAULT_RECONNECT_INTERVAL = 60 * 60;
+static const unsigned int DEFAULT_CONNECTION_TIME = 30;
+static const unsigned int DEFAULT_ATTEMPT_LIMIT = 2;
 
 typedef int64_t NodeId;
 
@@ -339,11 +341,11 @@ private:
     void ThreadSocketHandler();
     void ThreadDNSAddressSeed();
     // PASSIVE
-    void AddReconn(const CAddress& addr);
-//    void ReconnSuccess(const CAddress& addr);
-    void ProcessReconns();
-    void GetReconns(reconnmap_t &reconns);
-    void SetReconns(const reconnmap_t &reconns);
+//    void AddReconn(const CAddress& addr);
+////    void ReconnSuccess(const CAddress& addr);
+//    void ProcessReconns();
+//    void GetReconns(reconnmap_t &reconns);
+//    void SetReconns(const reconnmap_t &reconns);
     void ThreadReconnHandler();
 
     uint64_t CalculateKeyedNetGroup(const CAddress& ad) const;
@@ -372,11 +374,9 @@ private:
     void DumpData();
     void DumpBanlist();
     // PASSIVE
-    void DumpReconns();
-    bool ReconnsDirty();
-    void SetReconnsDirty(bool dirty=true);
-    // TODO
-//    void RemoveStale();
+//    void DumpReconns();
+//    bool ReconnsDirty();
+//    void SetReconnsDirty(bool dirty=true);
 
     // Network stats
     void RecordBytesRecv(uint64_t bytes);
@@ -410,7 +410,8 @@ private:
     CCriticalSection cs_setBanned;
     bool setBannedIsDirty;
     bool fAddressesInitialized;
-    CAddrMan addrman;
+    // Change to our addrman
+    CPAddrMan addrman;
     std::deque<std::string> vOneShots;
     CCriticalSection cs_vOneShots;
     std::vector<std::string> vAddedNodes GUARDED_BY(cs_vAddedNodes);
@@ -419,13 +420,7 @@ private:
     std::list<CNode*> vNodesDisconnected;
     mutable CCriticalSection cs_vNodes;
     std::atomic<NodeId> nLastNodeId;
-    
-    // PASSIVE
-    /** We can add a queue of reconnections */
-    reconnmap_t vReconns;
-    CCriticalSection cs_vReconns;
-    bool fReconnsDirty;
-
+   
     /** Services this instance offers */
     ServiceFlags nLocalServices;
 

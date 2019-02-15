@@ -5,7 +5,7 @@
 
 #include <paddrman.h>
 
-bool CPAddr::IsTerrible(int64_t nNow = GetAdjustedTime()) const
+bool CPAddr::IsTerrible(int64_t nNow) const
 {
     // We can decide the criteria later.
     return false;
@@ -24,7 +24,25 @@ CPAddr* CPAddrMan::Create(const CAddress &addr, const CNetAddr& addrSource)
 {
     std::string addrKey = addr.ToString();
     addrMap[addrKey] = CPAddr(addr, addrSource);
+    addrMap[addrKey].nRandomPos = vRandom.size();
+    vRandom.push_back(addrKey);
+    newSet.insert(addrKey);
     return &addrMap[addrKey];
+}
+
+void CPAddrMan::Delete(const CNetAddr& addr)
+{
+    assert(addrMap.count(addr.ToString()) != 0);
+    CPAddr& info = addrMap[addr.ToString()];
+    SwapRandom(info.nRandomPos, vRandom.size() - 1);
+    vRandom.pop_back();
+    addrMap.erase(info.ToString());
+    
+    if (info.fInReconn){
+        reconnSet.erase(info.ToString());
+    } else {
+        newSet.erase(info.ToString());
+    }
 }
 
 void CPAddrMan::SwapRandom(unsigned int nRndPos1, unsigned int nRndPos2)
@@ -96,7 +114,8 @@ void CPAddrMan::Good_(const CService& addr, int64_t nTime)
         return;
     
     // update info
-    info.nLastSeen = nTime;
+    info.nLastSuccess = nTime;
+    info.nLastTry = nTime;
     info.nSuccesses++;
     // nTime is not updated here, to avoid leaking information about
     // currently-connected peers.
@@ -106,6 +125,31 @@ void CPAddrMan::Good_(const CService& addr, int64_t nTime)
     
     info.fInReconn = true;
     reconnSet.insert(info.ToString());
+    newSet.erase(info.ToString());
+}
+
+void CPAddrMan::Attempt_(const CService& addr, bool fCountFailure, int64_t nTime)
+{
+    CPAddr* pinfo = Find(addr);
+    
+    // if not found, bail out
+    if (!pinfo)
+        return;
+    
+    CPAddr& info = *pinfo;
+    
+    // check whether we are talking about the exact same CService (including same port)
+    if (info != addr)
+        return;
+    
+    // update
+    info.nLastTry = nTime;
+    if (fCountFailure) {
+        info.nAttempts++;
+        
+        if (info.nAttempts > ADDRMAN_ATTEMPT_LIMIT)
+            Delete(info);
+    }
 }
 
 void CPAddrMan::GetAddr_(std::vector<CAddress>& vAddr)

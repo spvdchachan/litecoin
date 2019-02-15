@@ -1198,9 +1198,6 @@ void CConnman::ThreadSocketHandler()
                         }
                     }
                     if (fDelete) {
-                        // PASSIVE
-                        AddReconn(pnode->addr);
-                        
                         vNodesDisconnected.remove(pnode);
                         DeleteNode(pnode);
                     }
@@ -1447,11 +1444,10 @@ void CConnman::ThreadSocketHandler()
                 }
             }
             // PASSIVE
-            // Disconnect a peer after we receive addresses
-            if (pnode->fGetAddr && pnode->fAddrRec)
+            // Disconnect a peer after some interval (default 30s)
+            if (nTime - pnode->nTimeConnected > DEFAULT_CONNECTION_TIME)
             {
-                LogPrint(BCLog::NET, "Passive: %s duration=%d (after receiving addresses) \n", disconnectInfo,
-                        nTime - pnode->nTimeConnected);
+                LogPrint(BCLog::NET, "Passive: %s\n (end of connection)", disconnectInfo);
                 pnode->fDisconnect = true;
             }
         }
@@ -1676,16 +1672,16 @@ void CConnman::DumpAddresses()
 {
     int64_t nStart = GetTimeMillis();
 
-    CAddrDB adb;
+    CPAddrDB adb;
     adb.Write(addrman);
 
-    LogPrint(BCLog::NET, "Flushed %d addresses to peers.dat  %dms\n",
+    LogPrint(BCLog::NET, "Flushed %d addresses to passive_peers.dat  %dms\n",
            addrman.size(), GetTimeMillis() - nStart);
 }
 
 void CConnman::DumpData()
 {
-    DumpReconns();
+//    DumpReconns();
     DumpAddresses();
     DumpBanlist();
 }
@@ -1763,20 +1759,13 @@ void CConnman::ThreadOpenConnections(const std::vector<std::string> connect)
 
     // Initiate network connections
     int64_t nStart = GetTime();
-
-    // Minimum time before next feeler connection (in microseconds).
-    int64_t nNextFeeler = PoissonNextSend(nStart*1000*1000, FEELER_INTERVAL);
     while (!interruptNet)
     {
         ProcessOneShot();
 
         if (!interruptNet.sleep_for(std::chrono::milliseconds(500)))
             return;
-
-        CSemaphoreGrant grant(*semOutbound);
-        if (interruptNet)
-            return;
-
+        
         // Add seed nodes if DNS seeds are all down (an infrastructure attack?).
         if (addrman.size() == 0 && (GetTime() - nStart > 60)) {
             static bool done = false;
@@ -1788,116 +1777,32 @@ void CConnman::ThreadOpenConnections(const std::vector<std::string> connect)
                 done = true;
             }
         }
-
+        
         //
-        // Choose an address to connect to based on most recently seen
+        // Connect to "new" addresses
         //
         CAddress addrConnect;
-
-        // Only connect out to one peer per network group (/16 for IPv4).
-        // Do this here so we don't have to critsect vNodes inside mapAddresses critsect.
-        int nOutbound = 0;
-        std::set<std::vector<unsigned char> > setConnected;
-        {
-            LOCK(cs_vNodes);
-            for (CNode* pnode : vNodes) {
-                if (!pnode->fInbound && !pnode->m_manual_connection) {
-                    // Netgroups for inbound and addnode peers are not excluded because our goal here
-                    // is to not use multiple of our limited outbound slots on a single netgroup
-                    // but inbound and addnode peers do not use our outbound slots.  Inbound peers
-                    // also have the added issue that they're attacker controlled and could be used
-                    // to prevent us from connecting to particular hosts if we used them here.
-                    setConnected.insert(pnode->addr.GetGroup());
-                    nOutbound++;
-                }
-            }
-        }
-
-        // Feeler Connections
-        //
-        // Design goals:
-        //  * Increase the number of connectable addresses in the tried table.
-        //
-        // Method:
-        //  * Choose a random address from new and attempt to connect to it if we can connect
-        //    successfully it is added to tried.
-        //  * Start attempting feeler connections only after node finishes making outbound
-        //    connections.
-        //  * Only make a feeler connection once every few minutes.
-        //
-        bool fFeeler = false;
-        
-        // If it's time for a feeler connection 
-        if (nOutbound >= nMaxOutbound && !GetTryNewOutboundPeer()) {
-            int64_t nTime = GetTimeMicros(); // The current time right now (in microseconds).
-            if (nTime > nNextFeeler) {
-                nNextFeeler = PoissonNextSend(nTime, FEELER_INTERVAL);
-                fFeeler = true;
-            } else {
-                continue;
-            }
-        }
-
         int64_t nANow = GetAdjustedTime();
-        // Number of tries for connections. 
-        // We keep relax certain conditions as it increases.
-        int nTries = 0;
-        while (!interruptNet)
+        std::vector<CPAddr> vAddr = addrman.GetNew();
+        for (CPAddr &addr : vAddr) 
         {
-            // Select address to connect to. 
-            // If this is a feeler connection, we select a new address ONLY.
-            // i.e. if fFeeler = true.
-            // We might wanna shorten feeler interval if we wanna keep forcing
-            // new connections.
-            CAddrInfo addr = addrman.Select(fFeeler);
-
-            // if we selected an invalid address, restart
-            if (!addr.IsValid() || setConnected.count(addr.GetGroup()) || IsLocal(addr))
-                break;
-
-            // If we didn't find an appropriate destination after trying 100 addresses fetched from addrman,
-            // stop this loop, and let the outer loop run again (which sleeps, adds seed nodes, recalculates
-            // already-connected network ranges, ...) before trying new addrman addresses.
-            nTries++;
-            if (nTries > 100)
-                break;
-
-            if (IsLimited(addr))
+            if(!addr.IsValid() || addr.nAttempts > DEFAULT_ATTEMPT_LIMIT)
                 continue;
 
-            // only consider very recently tried nodes after 30 failed attempts
-            if (nANow - addr.nLastTry < 600 && nTries < 30)
-                continue;
-
-            // for non-feelers, require all the services we'll want,
-            // for feelers, only require they be a full node (only because most
-            // SPV clients don't have a good address DB available)
-            if (!fFeeler && !HasAllDesirableServiceFlags(addr.nServices)) {
-                continue;
-            } else if (fFeeler && !MayHaveUsefulAddressDB(addr.nServices)) {
-                continue;
-            }
-
-            // do not allow non-default ports, unless after 50 invalid addresses selected already
-            if (addr.GetPort() != Params().GetDefaultPort() && nTries < 50)
+            if(addr.nAttempts > 0 && nANow - addr.nLastTry < 60*60)
                 continue;
 
             addrConnect = addr;
-            break;
-        }
-
-        if (addrConnect.IsValid()) {
-
-            if (fFeeler) {
-                // Add small amount of random noise before connection to avoid synchronization.
-                int randsleep = GetRandInt(FEELER_SLEEP_WINDOW * 1000);
-                if (!interruptNet.sleep_for(std::chrono::milliseconds(randsleep)))
+            if (addrConnect.IsValid()) {
+                CSemaphoreGrant grant(*semOutbound);
+                if(interruptNet)
                     return;
-                LogPrint(BCLog::NET, "Making feeler connection to %s\n", addrConnect.ToString());
+                OpenNetworkConnection(addrConnect, true, &grant, nullptr);
             }
-
-            OpenNetworkConnection(addrConnect, (int)setConnected.size() >= std::min(nMaxConnections - 1, 2), &grant, nullptr, false, fFeeler);
         }
+        
+        if (!interruptNet.sleep_for(std::chrono::milliseconds(500)))
+            return;
     }
 }
 
@@ -2310,17 +2215,20 @@ bool CConnman::Start(CScheduler& scheduler, const Options& connOptions)
     if (clientInterface) {
         clientInterface->InitMessage(_("Loading P2P addresses..."));
     }
-    // Load addresses from peers.dat
+    // Load addresses from passive_peers.dat
+    // We are using the alternative address manager
     int64_t nStart = GetTimeMillis();
     {
-        CAddrDB adb;
+        CPAddrDB adb;
         if (adb.Read(addrman))
-            LogPrintf("Loaded %i addresses from peers.dat  %dms\n", addrman.size(), GetTimeMillis() - nStart);
+            LogPrintf("Loaded %i addresses from passive_peers.dat  %dms\n", addrman.size(), GetTimeMillis() - nStart);
         else {
             addrman.Clear(); // Addrman can be in an inconsistent state after failure, reset it
-            LogPrintf("Invalid or missing peers.dat; recreating\n");
+            LogPrintf("Invalid or missing passive_peers.dat; recreating\n");
             DumpAddresses();
         }
+        // For now: Construct in-memory index.
+         addrman.MakeContainers();
     }
     if (clientInterface)
         clientInterface->InitMessage(_("Loading banlist..."));
@@ -2340,23 +2248,6 @@ bool CConnman::Start(CScheduler& scheduler, const Options& connOptions)
         SetBannedSetDirty(true); // force write
         DumpBanlist();
     }
-    // PASSIVE
-    // Load addresses from reconns.dat
-    nStart = GetTimeMillis();
-    CReconnDB reconndb;
-    reconnmap_t reconns;
-    if (reconndb.Read(reconns)) {
-        SetReconns(reconns);
-        SetReconnsDirty(false);
-        
-        LogPrint(BCLog::NET, "Passive: Loaded %d reconn addrs from reconns.dat %dms\n",
-            reconns.size(), GetTimeMillis() - nStart);
-    } else {
-        LogPrintf("Invalid or missing reconns.dat; recreating\n");
-        SetReconnsDirty(true);
-        DumpReconns();
-    }
-
     uiInterface.InitMessage(_("Starting network threads..."));
 
     fAddressesInitialized = true;
@@ -2919,97 +2810,31 @@ uint64_t CConnman::CalculateKeyedNetGroup(const CAddress& ad) const
     return GetDeterministicRandomizer(RANDOMIZER_ID_NETGROUP).Write(vchNetGroup.data(), vchNetGroup.size()).Finalize();
 }
 
-// PASSIVE
-void CConnman::AddReconn(const CAddress& addr)
-{
-    LOCK(cs_vReconns);
-    auto it = vReconns.find(addr);
-    if(it != vReconns.end())
-    {
-        // Safe: Since we are sure that it exists inside the map.
-        CReconnAddr& reAddr = it->second;
-        reAddr.nLastSeen = GetSystemTimeInSeconds();
-    }
-    else
-    {
-        CReconnAddr reAddr(addr);
-        vReconns[addr] = reAddr;
-    }
-    fReconnsDirty = true;
-}
-
-void CConnman::ProcessReconns()
-{
-    LOCK(cs_vReconns);
-    for (auto& kv : vReconns)
-    {
-        CReconnAddr& reAddr = kv.second;
-        CSemaphoreGrant grant(*semOutbound, true);
-        if (grant) {
-            LogPrint(BCLog::NET, "Passive: attempting to reconnect address=%s lastseen=%.1fhrs successes=%d\n", 
-                    reAddr.ToString(),
-                    (double) (GetAdjustedTime()-reAddr.nLastSeen) / 3600.0,
-                    reAddr.nSuccesses);
-            OpenNetworkConnection((CAddress) reAddr, false, &grant, nullptr, false, false, false, true);
-        }
-             
-        // If successful
-        if (FindNode(kv.first) != nullptr)
-            reAddr.nSuccesses += 1;
-    }
-}
-
-bool CConnman::ReconnsDirty()
-{
-    LOCK(cs_vReconns);
-    return fReconnsDirty;
-}
-
-void CConnman::SetReconnsDirty(bool dirty)
-{
-    LOCK(cs_vReconns);
-    fReconnsDirty = dirty;
-}
-
-void CConnman::GetReconns(reconnmap_t& reconns)
-{
-    LOCK(cs_vReconns);
-    // Thread-safe copy
-    reconns = vReconns;
-}
-
-void CConnman::SetReconns(const reconnmap_t& reconns)
-{
-    LOCK(cs_vReconns);
-    vReconns = reconns;
-    fReconnsDirty = true;
-}
-
-void CConnman::DumpReconns()
-{
-    if (!ReconnsDirty())
-        return;
-    
-    int64_t nStart = GetTimeMillis();
-    CReconnDB reconndb;
-    reconnmap_t reconns;
-    GetReconns(reconns);
-    if (reconndb.Write(reconns))
-        SetReconnsDirty(false);
-    
-    LogPrint(BCLog::NET, "Passive: flushed %d reconn addrs to reconns.dat %dms\n",
-        reconns.size(), GetTimeMillis() - nStart);
-}
-
 void CConnman::ThreadReconnHandler()
 {
-    LogPrintf("Reconnection Thread has started\n");
     while (!interruptNet)
     {
         // Sleep until the next reconn interval
-        if (!interruptNet.sleep_for(std::chrono::seconds(RECONNECT_INTERVAL)))
+        if (!interruptNet.sleep_for(std::chrono::seconds(DEFAULT_RECONNECT_INTERVAL)))
             return;
         
-        ProcessReconns();
+        std::vector<CPAddr> reconns = addrman.GetReconns();
+        int64_t nTime = GetAdjustedTime();
+        for (CPAddr &addr : reconns)
+        {
+            // Too many unsuccessful attempts
+            if (addr.nAttempts > DEFAULT_ATTEMPT_LIMIT)
+                continue;
+            // Previously unsuccessful attempt
+            // Have to wait 
+            if(addr.nAttempts > 0 && nTime - addr.nLastTry < 60*60)
+                continue;
+            
+            CSemaphoreGrant grant(*semOutbound, true);
+            if (grant) {
+                LogPrint(BCLog::NET, "Passive: reconn: attempt to connect address=%s\n", addr.ToString());
+                OpenNetworkConnection((CAddress) addr, true, &grant, nullptr, false, false, false, true);
+            }
+        }
     }
 }

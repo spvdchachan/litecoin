@@ -16,6 +16,7 @@
 class CSubNet;
 class CAddrMan;
 class CDataStream;
+class CPAddrMan;
 
 typedef enum BanReason
 {
@@ -87,6 +88,18 @@ public:
     bool Write(const CAddrMan& addr);
     bool Read(CAddrMan& addr);
     static bool Read(CAddrMan& addr, CDataStream& ssPeers);
+};
+
+/** Access to the (IP) address database (passive_peers.dat) */
+class CPAddrDB
+{
+private:
+    fs::path pathAddr;
+public:
+    CPAddrDB();
+    bool Write(const CPAddrMan& addr);
+    bool Read(CPAddrMan& addr);
+    static bool Read(CPAddrMan& addr, CDataStream& ssPeers);
 };
 
 /** Access to the banlist database (banlist.dat) */
