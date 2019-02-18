@@ -486,7 +486,7 @@ void CNode::CloseSocketDisconnect()
     LOCK(cs_hSocket);
     if (hSocket != INVALID_SOCKET)
     {
-        LogPrint(BCLog::NET, "disconnecting %s peer=%d address=%s reconn=%s\n", fInbound ? "inbound" : "outbound", id, addrName, fReconn ? "true" : "false");
+//        LogPrint(BCLog::NET, "disconnecting %s peer=%d address=%s reconn=%s\n", fInbound ? "inbound" : "outbound", id, addrName, fReconn ? "true" : "false");
         CloseSocket(hSocket);
     }
 }
@@ -1411,7 +1411,7 @@ void CConnman::ThreadSocketHandler()
             //  PASSIVE
             std::ostringstream ss;
             ss << "disconnecting " << (pnode->fInbound ? "inbound" : "outbound") 
-                    << " addr=" << pnode->addr.ToString() 
+                    << " address=" << pnode->addr.ToString() 
                     << " reconn=" << (pnode->fReconn ? "true": "false");
             std::string disconnectInfo = SanitizeString(ss.str());
             if (nTime - pnode->nTimeConnected > 60)
@@ -1447,7 +1447,7 @@ void CConnman::ThreadSocketHandler()
             // Disconnect a peer after some interval (default 30s)
             if (nTime - pnode->nTimeConnected > DEFAULT_CONNECTION_TIME)
             {
-                LogPrint(BCLog::NET, "Passive: %s\n (end of connection)", disconnectInfo);
+                LogPrint(BCLog::NET, "Passive: %s (end of connection)\n", disconnectInfo);
                 pnode->fDisconnect = true;
             }
         }
@@ -1797,6 +1797,7 @@ void CConnman::ThreadOpenConnections(const std::vector<std::string> connect)
                 CSemaphoreGrant grant(*semOutbound);
                 if(interruptNet)
                     return;
+                LogPrint(BCLog::NET, "Passive: new: attempt to connect address=%s\n", addr.ToString());
                 OpenNetworkConnection(addrConnect, true, &grant, nullptr);
             }
         }
@@ -2819,6 +2820,7 @@ void CConnman::ThreadReconnHandler()
             return;
         
         std::vector<CPAddr> reconns = addrman.GetReconns();
+        LogPrint(BCLog::NET, "Passive: reconn: Starting reconn session with %d addresses\n", reconns.size());
         int64_t nTime = GetAdjustedTime();
         for (CPAddr &addr : reconns)
         {

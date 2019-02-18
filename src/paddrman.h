@@ -194,7 +194,9 @@ public:
                 newSet.insert(addr.ToString());
             addr.nRandomPos = vRandom.size();
             vRandom.push_back((*it).first);
+            LogPrintf("Address: %s\n", addr.ToString());
         }
+        
     }
     
     //! Add a single address
