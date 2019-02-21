@@ -486,7 +486,7 @@ void CNode::CloseSocketDisconnect()
     LOCK(cs_hSocket);
     if (hSocket != INVALID_SOCKET)
     {
-//        LogPrint(BCLog::NET, "disconnecting %s peer=%d address=%s reconn=%s\n", fInbound ? "inbound" : "outbound", id, addrName, fReconn ? "true" : "false");
+        LogPrint(BCLog::NET, "disconnecting fInbound=%s;address=%s;reconn=%s;addrRec=%s\n", fInbound ? "inbound" : "outbound", addrName, fReconn ? "true" : "false", fAddrRec ? "true" : "false");
         CloseSocket(hSocket);
     }
 }
@@ -1411,8 +1411,8 @@ void CConnman::ThreadSocketHandler()
             //  PASSIVE
             std::ostringstream ss;
             ss << "disconnecting " << (pnode->fInbound ? "inbound" : "outbound") 
-                    << " address=" << pnode->addr.ToString() 
-                    << " reconn=" << (pnode->fReconn ? "true": "false");
+                    << " address= " << pnode->addr.ToString() 
+                    << " reconn= " << (pnode->fReconn ? "true": "false");
             std::string disconnectInfo = SanitizeString(ss.str());
             if (nTime - pnode->nTimeConnected > 60)
             {
@@ -1445,9 +1445,9 @@ void CConnman::ThreadSocketHandler()
             }
             // PASSIVE
             // Disconnect a peer after some interval (default 30s)
-            if (nTime - pnode->nTimeConnected > DEFAULT_CONNECTION_TIME)
+            if (nTime - pnode->nTimeConnected > nConnectTime)
             {
-                LogPrint(BCLog::NET, "Passive: %s (end of connection)\n", disconnectInfo);
+                LogPrint(BCLog::NET, "disconnect address=%s end of connection %d\n", pnode->addr.ToString(), nConnectTime);
                 pnode->fDisconnect = true;
             }
         }
@@ -1789,7 +1789,10 @@ void CConnman::ThreadOpenConnections(const std::vector<std::string> connect)
             if(!addr.IsValid() || addr.nAttempts > DEFAULT_ATTEMPT_LIMIT)
                 continue;
 
-            if(addr.nAttempts > 0 && nANow - addr.nLastTry < 60*60)
+            if(addr.nAttempts == 1 && nANow - addr.nLastTry < 60*60)
+                continue;
+            
+            if(addr.nAttempts > 1 && nANow - addr.nLastTry < 60*60*6)
                 continue;
 
             addrConnect = addr;
@@ -1797,7 +1800,7 @@ void CConnman::ThreadOpenConnections(const std::vector<std::string> connect)
                 CSemaphoreGrant grant(*semOutbound);
                 if(interruptNet)
                     return;
-                LogPrint(BCLog::NET, "Passive: new: attempt to connect address=%s\n", addr.ToString());
+                LogPrint(BCLog::NET, "newconn: attempt to connect address=%s\n", addr.ToString());
                 OpenNetworkConnection(addrConnect, true, &grant, nullptr);
             }
         }
@@ -1929,7 +1932,7 @@ void CConnman::OpenNetworkConnection(const CAddress& addrConnect, bool fCountFai
         LOCK(cs_vNodes);
         vNodes.push_back(pnode);
     }
-    LogPrint(BCLog::NET, "Passive: successfully connect to outbound address=%s reconn=%s\n", addrConnect.ToString(), fReconn ? "true" : "false");
+    LogPrint(BCLog::NET, "Passive: successfully connect to outbound address=%s;reconn=%s\n", addrConnect.ToString(), fReconn ? "true" : "false");
 }
 
 void CConnman::ThreadMessageHandler()
@@ -2229,7 +2232,8 @@ bool CConnman::Start(CScheduler& scheduler, const Options& connOptions)
             DumpAddresses();
         }
         // For now: Construct in-memory index.
-         addrman.MakeContainers();
+        addrman.MakeContainers();
+        addrman.nAttemptLimit = nAttemptLimit;
     }
     if (clientInterface)
         clientInterface->InitMessage(_("Loading banlist..."));
@@ -2420,6 +2424,7 @@ void CConnman::SetServices(const CService &addr, ServiceFlags nServices)
 
 void CConnman::MarkAddressGood(const CAddress& addr)
 {
+    LogPrintf("Want to mark address %s good\n", addr.ToString());
     addrman.Good(addr);
 }
 
@@ -2689,7 +2694,10 @@ CNode::CNode(NodeId idIn, ServiceFlags nLocalServicesIn, int nMyStartingHeightIn
     fPauseRecv = false;
     fPauseSend = false;
     nProcessQueueSize = 0;
-
+    
+    // Extra flags
+    fReconn = false;
+    fAddrRec = false;
     for (const std::string &msg : getAllNetMessageTypes())
         mapRecvBytesPerMsgCmd[msg] = 0;
     mapRecvBytesPerMsgCmd[NET_MESSAGE_COMMAND_OTHER] = 0;
@@ -2816,25 +2824,28 @@ void CConnman::ThreadReconnHandler()
     while (!interruptNet)
     {
         // Sleep until the next reconn interval
-        if (!interruptNet.sleep_for(std::chrono::seconds(DEFAULT_RECONNECT_INTERVAL)))
+        if (!interruptNet.sleep_for(std::chrono::seconds(nReconnInterval)))
             return;
         
         std::vector<CPAddr> reconns = addrman.GetReconns();
-        LogPrint(BCLog::NET, "Passive: reconn: Starting reconn session with %d addresses\n", reconns.size());
+        LogPrint(BCLog::NET, "reconn: Starting reconn session with %d addresses\n", reconns.size());
         int64_t nTime = GetAdjustedTime();
         for (CPAddr &addr : reconns)
         {
             // Too many unsuccessful attempts
-            if (addr.nAttempts > DEFAULT_ATTEMPT_LIMIT)
+            if (addr.nAttempts > nAttemptLimit)
                 continue;
             // Previously unsuccessful attempt
             // Have to wait 
-            if(addr.nAttempts > 0 && nTime - addr.nLastTry < 60*60)
+            if(addr.nAttempts == 1 && nTime - addr.nLastTry < 60*60)
+                continue;
+
+            if(addr.nAttempts > 1 && nTime - addr.nLastTry < 60*60*6)
                 continue;
             
-            CSemaphoreGrant grant(*semOutbound, true);
+            CSemaphoreGrant grant(*semOutbound);
             if (grant) {
-                LogPrint(BCLog::NET, "Passive: reconn: attempt to connect address=%s\n", addr.ToString());
+                LogPrint(BCLog::NET, "reconn: attempt to connect address=%s\n", addr.ToString());
                 OpenNetworkConnection((CAddress) addr, true, &grant, nullptr, false, false, false, true);
             }
         }

@@ -525,6 +525,13 @@ std::string HelpMessage(HelpMessageMode mode)
         strUsage += HelpMessageOpt("-rpcservertimeout=<n>", strprintf("Timeout during HTTP requests (default: %d)", DEFAULT_HTTP_SERVER_TIMEOUT));
     }
 
+    // Extra options
+    strUsage += HelpMessageGroup(_("Extra options:"));
+    strUsage += HelpMessageOpt("-reconn", _("Enable reconnections (default: true)"));
+    strUsage += HelpMessageOpt("-reconninterval=<n>", strprintf(_("Reconnect reconn nodes every <n> second (default %d)"), DEFAULT_RECONNECT_INTERVAL));
+    strUsage += HelpMessageOpt("-connectiontime=<n>", strprintf(_("Disconnect a node after connected for <n> seconds (default %d)"), DEFAULT_CONNECTION_TIME));
+    strUsage += HelpMessageOpt("-attemptlimit=<n>", strprintf(_("Stop attempting to connect an address after <n> tries (default %d)"), DEFAULT_ATTEMPT_LIMIT)); 
+
     return strUsage;
 }
 
@@ -1160,6 +1167,7 @@ bool AppInitParameterInteraction()
             }
         }
     }
+    
     return true;
 }
 
@@ -1746,6 +1754,11 @@ bool AppInitMain()
             connOptions.m_specified_outgoing = connect;
         }
     }
+
+    // Extra options
+    connOptions.nReconnInterval = gArgs.GetArg("-reconninterval", DEFAULT_RECONNECT_INTERVAL);
+    connOptions.nConnectTime = gArgs.GetArg("-connectiontime", DEFAULT_CONNECTION_TIME);
+    connOptions.nAttemptLimit = gArgs.GetArg("-attemptlimit", DEFAULT_ATTEMPT_LIMIT);
     if (!connman.Start(scheduler, connOptions)) {
         return false;
     }

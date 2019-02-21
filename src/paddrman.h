@@ -57,12 +57,8 @@ public:
     template <typename Stream, typename Operation>
     inline void SerializationOp(Stream& s, Operation ser_action){
         READWRITE(*(CAddress*)this);
-        READWRITE(nLastTry);
-        READWRITE(nSuccesses);
         READWRITE(fInReconn);
         READWRITE(source);
-        READWRITE(nAttempts);
-        READWRITE(nLastSuccess);
     }
     
     void Init()
@@ -113,6 +109,10 @@ public:
  */
 class CPAddrMan 
 {
+public:
+    //! Attempt limit passed on by Connman
+    int nAttemptLimit;
+
 private:  
     //! Protect inner data structures
     mutable CCriticalSection cs;
@@ -132,7 +132,7 @@ private:
 protected:
     
     //! Find an entry.
-    CPAddr* Find(const CNetAddr& addr);
+    CPAddr* Find(const std::string& addrKey);
     
     //! find an entry, creating it if necessary.
     CPAddr* Create(const CAddress &addr, const CNetAddr &addrSource);
@@ -188,13 +188,20 @@ public:
         for(auto it = addrMap.begin(); it != addrMap.end(); it++)
         {
             CPAddr &addr = (*it).second;
+            // Initialize all in-memory fields
+            addr.nSuccesses = 0;
+            addr.nLastTry = 0;
+            addr.nLastSuccess = 0;
+            addr.nAttempts = 0;
+            
             if(addr.fInReconn)
                 reconnSet.insert(addr.ToString());
             else
                 newSet.insert(addr.ToString());
             addr.nRandomPos = vRandom.size();
             vRandom.push_back((*it).first);
-            LogPrintf("Address: %s\n", addr.ToString());
+            LogPrintf("Key %s\n", (*it).first);
+            LogPrintf("Address: %s InReconn=%s\n", addr.ToString(), addr.fInReconn ? "true" : "false");
         }
         
     }
@@ -230,6 +237,7 @@ public:
     void Good(const CService &addr, int64_t nTime = GetAdjustedTime())
     {
         LOCK(cs);
+        LogPrintf("good: CService %s\n", addr.ToString());
         Good_(addr, nTime);
     }
     

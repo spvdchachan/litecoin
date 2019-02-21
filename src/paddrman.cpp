@@ -11,12 +11,12 @@ bool CPAddr::IsTerrible(int64_t nNow) const
     return false;
 }
 
-CPAddr* CPAddrMan::Find(const CNetAddr& addr)
+CPAddr* CPAddrMan::Find(const std::string& addrKey)
 {
-    auto it = addrMap.find(addr.ToString());
+    auto it = addrMap.find(addrKey);
     if (it == addrMap.end())
         return nullptr;
-    
+    LogPrintf("find: Address %s found\n", (*it).second.ToString()); 
     return &(*it).second;
 }
 
@@ -43,6 +43,7 @@ void CPAddrMan::Delete(const CNetAddr& addr)
     } else {
         newSet.erase(info.ToString());
     }
+    LogPrintf("address=%s;unreachable\n", info.ToString());
 }
 
 void CPAddrMan::SwapRandom(unsigned int nRndPos1, unsigned int nRndPos2)
@@ -68,7 +69,7 @@ bool CPAddrMan::Add_(const CAddress& addr, const CNetAddr& source, int64_t nTime
         return false;
     
     bool fNew = false;
-    CPAddr* pinfo = Find(addr);
+    CPAddr* pinfo = Find(addr.ToString());
     
     // Do not set a penalty for a source's self-announcement
     if (addr == source)
@@ -101,13 +102,16 @@ bool CPAddrMan::Add_(const CAddress& addr, const CNetAddr& source, int64_t nTime
 
 void CPAddrMan::Good_(const CService& addr, int64_t nTime)
 {
-    CPAddr* pinfo = Find(addr);
+    CPAddr* pinfo = Find(addr.ToString());
     
     // if not found, bail out
-    if (!pinfo)
+    if (!pinfo) {
+        LogPrintf("good: cannot find address\n");
         return;
-    
+    }
+     
     CPAddr& info = *pinfo;
+    LogPrint(BCLog::ADDRMAN, "Called address %s good\n", info.ToString());
     
     // check whether we are talking about the exact same CService (including same port)
     if (info != addr)
@@ -116,6 +120,7 @@ void CPAddrMan::Good_(const CService& addr, int64_t nTime)
     // update info
     info.nLastSuccess = nTime;
     info.nLastTry = nTime;
+    info.nAttempts = 0;
     info.nSuccesses++;
     // nTime is not updated here, to avoid leaking information about
     // currently-connected peers.
@@ -126,11 +131,12 @@ void CPAddrMan::Good_(const CService& addr, int64_t nTime)
     info.fInReconn = true;
     reconnSet.insert(info.ToString());
     newSet.erase(info.ToString());
+    LogPrint(BCLog::ADDRMAN, "Added %s to reconn\n", info.ToString());
 }
 
 void CPAddrMan::Attempt_(const CService& addr, bool fCountFailure, int64_t nTime)
 {
-    CPAddr* pinfo = Find(addr);
+    CPAddr* pinfo = Find(addr.ToString());
     
     // if not found, bail out
     if (!pinfo)
@@ -147,7 +153,7 @@ void CPAddrMan::Attempt_(const CService& addr, bool fCountFailure, int64_t nTime
     if (fCountFailure) {
         info.nAttempts++;
         
-        if (info.nAttempts > ADDRMAN_ATTEMPT_LIMIT)
+        if (info.nAttempts > nAttemptLimit)
             Delete(info);
     }
 }
@@ -175,7 +181,7 @@ void CPAddrMan::GetAddr_(std::vector<CAddress>& vAddr)
 
 void CPAddrMan::Connected_(const CService& addr, int64_t nTime)
 {
-    CPAddr* pinfo = Find(addr);
+    CPAddr* pinfo = Find(addr.ToString());
 
     // if not found, bail out
     if (!pinfo)
@@ -195,7 +201,7 @@ void CPAddrMan::Connected_(const CService& addr, int64_t nTime)
 
 void CPAddrMan::SetServices_(const CService& addr, ServiceFlags nServices)
 {
-    CPAddr* pinfo = Find(addr);
+    CPAddr* pinfo = Find(addr.ToString());
     
     // if not found, bail out
     if(!pinfo)

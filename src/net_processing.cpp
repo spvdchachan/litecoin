@@ -1689,8 +1689,9 @@ bool static ProcessMessage(CNode* pfrom, const std::string& strCommand, CDataStr
                 connman->PushMessage(pfrom, CNetMsgMaker(nSendVersion).Make(NetMsgType::GETADDR));
                 pfrom->fGetAddr = true;
             }
-            connman->MarkAddressGood(pfrom->addr);
+            //connman->MarkAddressGood(pfrom->addr);
         }
+        connman->MarkAddressGood(pfrom->addr);
 
         std::string remoteAddr;
         if (fLogIPs)

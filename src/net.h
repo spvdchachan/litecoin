@@ -58,7 +58,7 @@ static const unsigned int MAX_PROTOCOL_MESSAGE_LENGTH = 4 * 1000 * 1000;
 /** Maximum length of strSubVer in `version` message */
 static const unsigned int MAX_SUBVERSION_LENGTH = 256;
 /** Maximum number of automatic outgoing nodes */
-static const int MAX_OUTBOUND_CONNECTIONS = 5000;
+static const int MAX_OUTBOUND_CONNECTIONS = 500;
 /** Maximum number of addnode outgoing nodes */
 static const int MAX_ADDNODE_CONNECTIONS = 8;
 /** -listen default */
@@ -74,7 +74,7 @@ static const size_t MAPASKFOR_MAX_SZ = MAX_INV_SZ;
 /** The maximum number of entries in setAskFor (larger due to getdata latency)*/
 static const size_t SETASKFOR_MAX_SZ = 2 * MAX_INV_SZ;
 /** The maximum number of peer connections to maintain. */
-static const unsigned int DEFAULT_MAX_PEER_CONNECTIONS = 100000;
+static const unsigned int DEFAULT_MAX_PEER_CONNECTIONS = 1000;
 /** The default for -maxuploadtarget. 0 = Unlimited */
 static const uint64_t DEFAULT_MAX_UPLOAD_TARGET = 0;
 /** The default timeframe for -maxuploadtarget. 1 day. */
@@ -90,7 +90,8 @@ static const size_t DEFAULT_MAXSENDBUFFER    = 1 * 1000;
 static const unsigned int DEFAULT_MISBEHAVING_BANTIME = 60 * 60 * 24;  // Default 24-hour ban
 
 // PASSIVE
-static const unsigned int DEFAULT_RECONNECT_INTERVAL = 60 * 60;
+// For testing: make it short.
+static const unsigned int DEFAULT_RECONNECT_INTERVAL = 60 * 10;
 static const unsigned int DEFAULT_CONNECTION_TIME = 30;
 static const unsigned int DEFAULT_ATTEMPT_LIMIT = 2;
 
@@ -152,6 +153,9 @@ public:
         bool m_use_addrman_outgoing = true;
         std::vector<std::string> m_specified_outgoing;
         std::vector<std::string> m_added_nodes;
+        int nReconnInterval = 0;
+        int nConnectTime = 0;
+        int nAttemptLimit = 0;
     };
 
     void Init(const Options& connOptions) {
@@ -175,6 +179,9 @@ public:
             LOCK(cs_vAddedNodes);
             vAddedNodes = connOptions.m_added_nodes;
         }
+        nReconnInterval = connOptions.nReconnInterval;
+        nConnectTime = connOptions.nConnectTime;
+        nAttemptLimit = connOptions.nAttemptLimit;
     }
 
     CConnman(uint64_t seed0, uint64_t seed1);
@@ -458,6 +465,11 @@ private:
      *  in excess of nMaxOutbound
      *  This takes the place of a feeler connection */
     std::atomic_bool m_try_another_outbound_peer;
+
+    // Extra
+    int nReconnInterval;
+    int nConnectTime;
+    int nAttemptLimit;
 
     friend struct CConnmanTest;
 };
