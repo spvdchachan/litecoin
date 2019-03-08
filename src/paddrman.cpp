@@ -16,7 +16,6 @@ CPAddr* CPAddrMan::Find(const std::string& addrKey)
     auto it = addrMap.find(addrKey);
     if (it == addrMap.end())
         return nullptr;
-    LogPrintf("find: Address %s found\n", (*it).second.ToString()); 
     return &(*it).second;
 }
 
@@ -30,10 +29,10 @@ CPAddr* CPAddrMan::Create(const CAddress &addr, const CNetAddr& addrSource)
     return &addrMap[addrKey];
 }
 
-void CPAddrMan::Delete(const CNetAddr& addr)
+void CPAddrMan::Delete(const std::string& addr)
 {
-    assert(addrMap.count(addr.ToString()) != 0);
-    CPAddr& info = addrMap[addr.ToString()];
+    assert(addrMap.count(addr) != 0);
+    CPAddr& info = addrMap[addr];
     SwapRandom(info.nRandomPos, vRandom.size() - 1);
     vRandom.pop_back();
     addrMap.erase(info.ToString());
@@ -43,7 +42,7 @@ void CPAddrMan::Delete(const CNetAddr& addr)
     } else {
         newSet.erase(info.ToString());
     }
-    LogPrintf("address=%s;unreachable\n", info.ToString());
+    LogPrintf("Passive: address=%s;unreachable\n", info.ToString());
 }
 
 void CPAddrMan::SwapRandom(unsigned int nRndPos1, unsigned int nRndPos2)
@@ -106,12 +105,10 @@ void CPAddrMan::Good_(const CService& addr, int64_t nTime)
     
     // if not found, bail out
     if (!pinfo) {
-        LogPrintf("good: cannot find address\n");
         return;
     }
      
     CPAddr& info = *pinfo;
-    LogPrint(BCLog::ADDRMAN, "Called address %s good\n", info.ToString());
     
     // check whether we are talking about the exact same CService (including same port)
     if (info != addr)
@@ -131,7 +128,7 @@ void CPAddrMan::Good_(const CService& addr, int64_t nTime)
     info.fInReconn = true;
     reconnSet.insert(info.ToString());
     newSet.erase(info.ToString());
-    LogPrint(BCLog::ADDRMAN, "Added %s to reconn\n", info.ToString());
+    LogPrint(BCLog::ADDRMAN, "Passive: Added address=%s to reconn\n", info.ToString());
 }
 
 void CPAddrMan::Attempt_(const CService& addr, bool fCountFailure, int64_t nTime)
@@ -154,7 +151,7 @@ void CPAddrMan::Attempt_(const CService& addr, bool fCountFailure, int64_t nTime
         info.nAttempts++;
         
         if (info.nAttempts > nAttemptLimit)
-            Delete(info);
+            Delete(info.ToString());
     }
 }
 

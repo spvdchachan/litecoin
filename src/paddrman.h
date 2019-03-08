@@ -138,7 +138,7 @@ protected:
     CPAddr* Create(const CAddress &addr, const CNetAddr &addrSource);
     
     //! Delete an entry when it exceeds the nAttempts limit.
-    void Delete(const CNetAddr& addr);
+    void Delete(const std::string& addr);
     
     //! Swap two elements in vRandom
     void SwapRandom(unsigned int nRndPos1, unsigned int nRndPos2);
@@ -200,8 +200,6 @@ public:
                 newSet.insert(addr.ToString());
             addr.nRandomPos = vRandom.size();
             vRandom.push_back((*it).first);
-            LogPrintf("Key %s\n", (*it).first);
-            LogPrintf("Address: %s InReconn=%s\n", addr.ToString(), addr.fInReconn ? "true" : "false");
         }
         
     }

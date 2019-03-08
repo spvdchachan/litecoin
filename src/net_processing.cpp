@@ -882,8 +882,8 @@ void PeerLogicValidation::NewPoWValidBlock(const CBlockIndex *pindex, const std:
         if (state.fPreferHeaderAndIDs && (!fWitnessEnabled || state.fWantsCmpctWitness) &&
                 !PeerHasHeader(&state, pindex) && PeerHasHeader(&state, pindex->pprev)) {
 
-            LogPrint(BCLog::NET, "%s sending header-and-ids %s to peer=%d\n", "PeerLogicValidation::NewPoWValidBlock",
-                    hashBlock.ToString(), pnode->GetId());
+            LogPrint(BCLog::NET, "%s sending header-and-ids %s to peer=%d address=%s\n", "PeerLogicValidation::NewPoWValidBlock",
+                    hashBlock.ToString(), pnode->GetId(), pnode->addr.ToString());
             connman->PushMessage(pnode, msgMaker.Make(NetMsgType::CMPCTBLOCK, *pcmpctblock));
             state.pindexBestHeaderSent = pindex;
         }
@@ -1081,7 +1081,7 @@ void static ProcessGetBlockData(CNode* pfrom, const Consensus::Params& consensus
     if (mi != mapBlockIndex.end()) {
         send = BlockRequestAllowed(mi->second, consensusParams);
         if (!send) {
-            LogPrint(BCLog::NET, "%s: ignoring request from peer=%i for old block that isn't in the main chain\n", __func__, pfrom->GetId());
+            LogPrint(BCLog::NET, "%s: ignoring request from peer=%i address=%s for old block that isn't in the main chain\n", __func__, pfrom->GetId(), pfrom->addr.ToString());
         }
     }
     const CNetMsgMaker msgMaker(pfrom->GetSendVersion());
@@ -1493,7 +1493,7 @@ bool static ProcessHeadersMessage(CNode *pfrom, CConnman *connman, const std::ve
 
 bool static ProcessMessage(CNode* pfrom, const std::string& strCommand, CDataStream& vRecv, int64_t nTimeReceived, const CChainParams& chainparams, CConnman* connman, const std::atomic<bool>& interruptMsgProc)
 {
-    LogPrint(BCLog::NET, "received: %s (%u bytes) peer=%d addr=%s\n", SanitizeString(strCommand), vRecv.size(), pfrom->GetId(), pfrom->addr.ToString());
+    LogPrint(BCLog::NET, "received: %s (%u bytes) peer=%d address=%s\n", SanitizeString(strCommand), vRecv.size(), pfrom->GetId(), pfrom->addr.ToString());
     if (gArgs.IsArgSet("-dropmessagestest") && GetRand(gArgs.GetArg("-dropmessagestest", 0)) == 0)
     {
         LogPrintf("dropmessagestest DROPPING RECV MESSAGE\n");
@@ -1594,7 +1594,7 @@ bool static ProcessMessage(CNode* pfrom, const std::string& strCommand, CDataStr
         if (nVersion < MIN_PEER_PROTO_VERSION)
         {
             // disconnect from peers older than this proto version
-            LogPrint(BCLog::NET, "peer=%d using obsolete version %i; disconnecting\n", pfrom->GetId(), nVersion);
+            LogPrint(BCLog::NET, "peer=%d address=%s using obsolete version %i; disconnecting\n", pfrom->GetId(), pfrom->addr.ToString(),  nVersion);
             connman->PushMessage(pfrom, CNetMsgMaker(INIT_PROTO_VERSION).Make(NetMsgType::REJECT, strCommand, REJECT_OBSOLETE,
                                strprintf("Version must be %d or greater", MIN_PEER_PROTO_VERSION)));
             pfrom->fDisconnect = true;
@@ -1695,7 +1695,7 @@ bool static ProcessMessage(CNode* pfrom, const std::string& strCommand, CDataStr
 
         std::string remoteAddr;
         if (fLogIPs)
-            remoteAddr = ", peeraddr=" + pfrom->addr.ToString();
+            remoteAddr = ", address=" + pfrom->addr.ToString();
 
         LogPrint(BCLog::NET, "receive version message: %s: version %d, blocks=%d, us=%s, peer=%d%s\n",
                   cleanSubVer, pfrom->nVersion,
@@ -1744,7 +1744,7 @@ bool static ProcessMessage(CNode* pfrom, const std::string& strCommand, CDataStr
             State(pfrom->GetId())->fCurrentlyConnected = true;
             LogPrintf("New outbound peer connected: version: %d, blocks=%d, peer=%d%s\n",
                       pfrom->nVersion.load(), pfrom->nStartingHeight, pfrom->GetId(),
-                      (fLogIPs ? strprintf(", peeraddr=%s", pfrom->addr.ToString()) : ""));
+                      (fLogIPs ? strprintf(", address=%s", pfrom->addr.ToString()) : ""));
         }
 
         if (pfrom->nVersion >= SENDHEADERS_VERSION) {
