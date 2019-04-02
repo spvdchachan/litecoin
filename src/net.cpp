@@ -408,7 +408,9 @@ CNode* CConnman::ConnectNode(CAddress addrConnect, const char *pszDest, bool fCo
             }
         }
     }
-
+    
+    // Mark as attempted
+    addrman.Attempt(addrConnect, fCountFailure);
     // Connect
     bool connected = false;
     SOCKET hSocket = INVALID_SOCKET;
@@ -433,7 +435,6 @@ CNode* CConnman::ConnectNode(CAddress addrConnect, const char *pszDest, bool fCo
         if (!proxyConnectionFailed) {
             // If a connection to the node was attempted, and failure (if any) is not caused by a problem connecting to
             // the proxy, mark this as an attempt.
-            addrman.Attempt(addrConnect, fCountFailure);
         }
     } else if (pszDest && GetNameProxy(proxy)) {
         hSocket = CreateSocket(proxy.proxy);
@@ -486,7 +487,8 @@ void CNode::CloseSocketDisconnect()
     LOCK(cs_hSocket);
     if (hSocket != INVALID_SOCKET)
     {
-        LogPrint(BCLog::NET, "Passive: disconnecting fInbound=%s;address=%s;reconn=%s;addrRec=%s\n", fInbound ? "inbound" : "outbound", addrName, fReconn ? "true" : "false", fAddrRec ? "true" : "false");
+//        LogPrint(BCLog::NET, "Passive: disconnecting fInbound=%s;address=%s;reconn=%s;addrRec=%s\n", fInbound ? "inbound" : "outbound", addrName, fReconn ? "true" : "false", fAddrRec ? "true" : "false");
+        LogAction(addr.ToString(), "disconnected", {fInbound ? "inbound" : "outbound", fReconn ? "reconn": "notreconn"});
         CloseSocket(hSocket);
     }
 }
@@ -1141,12 +1143,14 @@ void CConnman::AcceptConnection(const ListenSocket& hListenSocket) {
     pnode->fWhitelisted = whitelisted;
     m_msgproc->InitializeNode(pnode);
 
-    LogPrint(BCLog::NET, "Passive: inbound connection from address=%s accepted\n", addr.ToString());
-
+//    LogPrint(BCLog::NET, "Passive: inbound connection from address=%s accepted\n", addr.ToString());
+    // We also add the address directly so we can try reconnect later.
+    addrman.Add(addr, CNetAddr());
     {
         LOCK(cs_vNodes);
         vNodes.push_back(pnode);
     }
+    LogAction(addr.ToString(), "connected", {"inbound"});
 }
 
 void CConnman::ThreadSocketHandler()
@@ -1784,9 +1788,10 @@ void CConnman::ThreadOpenConnections(const std::vector<std::string> connect)
         CAddress addrConnect;
         int64_t nANow = GetAdjustedTime();
         std::vector<CPAddr> vAddr = addrman.GetNew();
+        LogPrint(BCLog::NET, "Debug: Starting newconn with %d addresses\n", vAddr.size());
         for (CPAddr &addr : vAddr) 
         {
-            if(!addr.IsValid() || addr.nAttempts > DEFAULT_ATTEMPT_LIMIT)
+            if(!addr.IsValid() || addr.nAttempts > nAttemptLimit)
                 continue;
 
             if(addr.nAttempts == 1 && nANow - addr.nLastTry < 60*60)
@@ -1800,7 +1805,8 @@ void CConnman::ThreadOpenConnections(const std::vector<std::string> connect)
                 CSemaphoreGrant grant(*semOutbound);
                 if(interruptNet)
                     return;
-                LogPrint(BCLog::NET, "Passive: newconn: attempt to connect address=%s\n", addr.ToString());
+                //LogPrint(BCLog::NET, "Passive: newconn attempt to connect address=%s\n", addr.ToString());
+                LogAction(addr.ToString(), "tryconnect");
                 OpenNetworkConnection(addrConnect, true, &grant, nullptr);
             }
         }
@@ -1915,7 +1921,7 @@ void CConnman::OpenNetworkConnection(const CAddress& addrConnect, bool fCountFai
     CNode* pnode = ConnectNode(addrConnect, pszDest, fCountFailure);
 
     if (!pnode) {
-        LogPrint(BCLog::NET, "Passive: failed to connect address=%s;reconn=%s\n", addrConnect.ToString(), fReconn ? "true": "false"); 
+//        LogPrint(BCLog::NET, "Passive: failed to connect address=%s;reconn=%s\n", addrConnect.ToString(), fReconn ? "true": "false"); 
         return;
     }
     if (grantOutbound)
@@ -1934,7 +1940,8 @@ void CConnman::OpenNetworkConnection(const CAddress& addrConnect, bool fCountFai
         LOCK(cs_vNodes);
         vNodes.push_back(pnode);
     }
-    LogPrint(BCLog::NET, "Passive: successfully connect to outbound address=%s;reconn=%s\n", addrConnect.ToString(), fReconn ? "true" : "false");
+//    LogPrint(BCLog::NET, "Passive: successfully connect to outbound address=%s;reconn=%s\n", addrConnect.ToString(), fReconn ? "true" : "false");
+    LogAction(addrConnect.ToString(), fReconn ? "reconnected" : "connected", {"outbound"});
 }
 
 void CConnman::ThreadMessageHandler()
@@ -2193,7 +2200,9 @@ bool CConnman::InitBinds(const std::vector<CService>& binds, const std::vector<C
 bool CConnman::Start(CScheduler& scheduler, const Options& connOptions)
 {
     Init(connOptions);
-
+    // Print Current configuration
+    LogPrintf("Passive: Configuration maxconnections=%d maxoutbound=%d\n", nMaxConnections, nMaxOutbound);
+    LogPrintf("Passive: Configuration reconninterval=%d connectiontime=%d attemptlimit=%d\n", nReconnInterval, nConnectTime, nAttemptLimit); 
     {
         LOCK(cs_totalBytesRecv);
         nTotalBytesRecv = 0;
@@ -2830,7 +2839,7 @@ void CConnman::ThreadReconnHandler()
             return;
         
         std::vector<CPAddr> reconns = addrman.GetReconns();
-        LogPrint(BCLog::NET, "Passive: reconn: Starting reconn session with %d addresses\n", reconns.size());
+        LogPrint(BCLog::NET, "Passive: Starting reconn session with %d addresses\n", reconns.size());
         int64_t nTime = GetAdjustedTime();
         for (CPAddr &addr : reconns)
         {
@@ -2847,9 +2856,11 @@ void CConnman::ThreadReconnHandler()
             
             CSemaphoreGrant grant(*semOutbound);
             if (grant) {
-                LogPrint(BCLog::NET, "Passive: reconn: attempt to connect address=%s\n", addr.ToString());
+//                LogPrint(BCLog::NET, "Passive: reconn attempt to connect address=%s\n", addr.ToString());
+                LogAction(addr.ToString(), "tryreconnect");
                 OpenNetworkConnection((CAddress) addr, true, &grant, nullptr, false, false, false, true);
             }
         }
+        LogPrint(BCLog::NET, "Passive: Finished reconn session\n");
     }
 }

@@ -320,7 +320,7 @@ static std::string LogTimestampStr(const std::string &str, std::atomic_bool *fSt
 
     if (*fStartedNewLine) {
         int64_t nTimeMicros = GetTimeMicros();
-        strStamped = DateTimeStrFormat("%Y-%m-%d %H:%M:%S", nTimeMicros/1000000);
+        strStamped = DateTimeStrFormat("%Y-%m-%dT%H:%M:%SZ", nTimeMicros/1000000);
         if (fLogTimeMicros)
             strStamped += strprintf(".%06d", nTimeMicros%1000000);
         int64_t mocktime = GetMockTime();
@@ -963,4 +963,25 @@ std::string CopyrightHolders(const std::string& strPrefix)
 int64_t GetStartupTime()
 {
     return nStartupTime;
+}
+
+void LogDiscovery(std::string addr, std::string source)
+{
+    // address;source
+    LogPrint(BCLog::NET, "Discovery: %s;%s\n", addr, source);
+}
+
+void LogAction(std::string addr, std::string action, std::initializer_list<std::string> info)
+{
+    auto it = info.begin();
+    std::string infostr = *it;
+    ++it;
+    while(it != info.end())
+    {
+        infostr += "|";
+        infostr += *it;
+        ++it;
+    }
+    // address;action;info
+    LogPrint(BCLog::NET, "Action: %s;%s;%s\n", addr, action, infostr);
 }

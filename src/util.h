@@ -22,6 +22,7 @@
 
 #include <atomic>
 #include <exception>
+#include <initializer_list>
 #include <map>
 #include <memory>
 #include <stdint.h>
@@ -142,7 +143,6 @@ template<typename T, typename... Args> static inline void MarkUsed(const T& t, c
 #ifdef USE_COVERAGE
 #define LogPrintf(...) do { MarkUsed(__VA_ARGS__); } while(0)
 #define LogPrint(category, ...) do { MarkUsed(__VA_ARGS__); } while(0)
-#define LogPassivePrint(category, ...) do { MarkUsed(__VA_ARGS__); } while(0)
 #else
 #define LogPrintf(...) do { \
     std::string _log_msg_; /* Unlikely name to avoid shadowing variables */ \
@@ -156,12 +156,6 @@ template<typename T, typename... Args> static inline void MarkUsed(const T& t, c
 } while(0)
 
 #define LogPrint(category, ...) do { \
-    if (LogAcceptCategory((category))) { \
-        LogPrintf(__VA_ARGS__); \
-    } \
-} while(0)
-
-#define LogPassivePrint(category, ...) do { \
     if (LogAcceptCategory((category))) { \
         LogPrintf(__VA_ARGS__); \
     } \
@@ -354,5 +348,10 @@ std::unique_ptr<T> MakeUnique(Args&&... args)
 {
     return std::unique_ptr<T>(new T(std::forward<Args>(args)...));
 }
+
+// Extra Logging Functions
+void LogDiscovery(std::string addr, std::string source);
+void LogAction(std::string addr, std::string action, std::initializer_list<std::string> info = {""});
+// void LogDisconnect(std::string addr);
 
 #endif // BITCOIN_UTIL_H

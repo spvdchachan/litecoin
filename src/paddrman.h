@@ -235,7 +235,6 @@ public:
     void Good(const CService &addr, int64_t nTime = GetAdjustedTime())
     {
         LOCK(cs);
-        LogPrintf("good: CService %s\n", addr.ToString());
         Good_(addr, nTime);
     }
     

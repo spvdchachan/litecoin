@@ -527,10 +527,11 @@ std::string HelpMessage(HelpMessageMode mode)
 
     // Extra options
     strUsage += HelpMessageGroup(_("Extra options:"));
-    strUsage += HelpMessageOpt("-reconn", _("Enable reconnections (default: true)"));
+//    strUsage += HelpMessageOpt("-reconn", _("Enable reconnections (default: true)"));
     strUsage += HelpMessageOpt("-reconninterval=<n>", strprintf(_("Reconnect reconn nodes every <n> second (default %d)"), DEFAULT_RECONNECT_INTERVAL));
     strUsage += HelpMessageOpt("-connectiontime=<n>", strprintf(_("Disconnect a node after connected for <n> seconds (default %d)"), DEFAULT_CONNECTION_TIME));
-    strUsage += HelpMessageOpt("-attemptlimit=<n>", strprintf(_("Stop attempting to connect an address after <n> tries (default %d)"), DEFAULT_ATTEMPT_LIMIT)); 
+    strUsage += HelpMessageOpt("-attemptlimit=<n>", strprintf(_("Stop attempting to connect an address after <n> tries (default %d)"), DEFAULT_ATTEMPT_LIMIT));
+    strUsage += HelpMessageOpt("-maxoutbounds=<n>", strprintf(_("Maximum outbound connections (less than maxconnections) (default %d)"), MAX_OUTBOUND_CONNECTIONS));
 
     return strUsage;
 }
@@ -844,7 +845,7 @@ int nMaxConnections;
 int nUserMaxConnections;
 int nFD;
 ServiceFlags nLocalServices = ServiceFlags(NODE_NETWORK | NODE_NETWORK_LIMITED);
-
+int nMaxOutbound;
 } // namespace
 
 [[noreturn]] static void new_handler_terminate()
@@ -933,6 +934,9 @@ bool AppInitParameterInteraction()
     int nBind = std::max(nUserBind, size_t(1));
     nUserMaxConnections = gArgs.GetArg("-maxconnections", DEFAULT_MAX_PEER_CONNECTIONS);
     nMaxConnections = std::max(nUserMaxConnections, 0);
+    
+    // Add max outbounds option
+    nMaxOutbound = gArgs.GetArg("-maxoutbounds", MAX_OUTBOUND_CONNECTIONS);
 
     // Trim requested connection counts, to fit into system limitations
     // nMaxConnections = std::max(std::min(nMaxConnections, (int)(FD_SETSIZE - nBind - MIN_CORE_FILEDESCRIPTORS - MAX_ADDNODE_CONNECTIONS)), 0);
@@ -1705,7 +1709,7 @@ bool AppInitMain()
     CConnman::Options connOptions;
     connOptions.nLocalServices = nLocalServices;
     connOptions.nMaxConnections = nMaxConnections;
-    connOptions.nMaxOutbound = std::min(MAX_OUTBOUND_CONNECTIONS, connOptions.nMaxConnections);
+    connOptions.nMaxOutbound = std::min(nMaxOutbound, connOptions.nMaxConnections);
     connOptions.nMaxAddnode = MAX_ADDNODE_CONNECTIONS;
     connOptions.nMaxFeeler = 1;
     connOptions.nBestHeight = chain_active_height;

@@ -1685,12 +1685,15 @@ bool static ProcessMessage(CNode* pfrom, const std::string& strCommand, CDataStr
             // Get recent addresses
             if (pfrom->fOneShot || pfrom->nVersion >= CADDR_TIME_VERSION || connman->GetAddressCount() < 1000)
             {
-                // 
-                connman->PushMessage(pfrom, CNetMsgMaker(nSendVersion).Make(NetMsgType::GETADDR));
-                pfrom->fGetAddr = true;
+                // connman->PushMessage(pfrom, CNetMsgMaker(nSendVersion).Make(NetMsgType::GETADDR));
+                // pfrom->fGetAddr = true;
+                
             }
             //connman->MarkAddressGood(pfrom->addr);
         }
+        
+        // Getaddr regardless of any conditions
+        connman->PushMessage(pfrom, CNetMsgMaker(nSendVersion).Make(NetMsgType::GETADDR));
         connman->MarkAddressGood(pfrom->addr);
 
         std::string remoteAddr;
@@ -1701,6 +1704,8 @@ bool static ProcessMessage(CNode* pfrom, const std::string& strCommand, CDataStr
                   cleanSubVer, pfrom->nVersion,
                   pfrom->nStartingHeight, addrMe.ToString(), pfrom->GetId(),
                   remoteAddr);
+        LogAction(pfrom->addr.ToString(), "versionrecv", {cleanSubVer});
+        LogAction(pfrom->addr.ToString(), "getaddr");
 
         int64_t nTimeOffset = nTime - GetTime();
         pfrom->nTimeOffset = nTimeOffset;
@@ -1831,6 +1836,7 @@ bool static ProcessMessage(CNode* pfrom, const std::string& strCommand, CDataStr
         if (pfrom->fOneShot)
             pfrom->fDisconnect = true;
         pfrom->fAddrRec = true;
+        LogAction(pfrom->addr.ToString(), "addr", {std::to_string(vAddr.size())});
     }
 
     else if (strCommand == NetMsgType::SENDHEADERS)
