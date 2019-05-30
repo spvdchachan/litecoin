@@ -1788,7 +1788,8 @@ void CConnman::ThreadOpenConnections(const std::vector<std::string> connect)
         CAddress addrConnect;
         int64_t nANow = GetAdjustedTime();
         std::vector<CPAddr> vAddr = addrman.GetNew();
-        LogPrint(BCLog::NET, "Debug: Starting newconn with %d addresses\n", vAddr.size());
+        LogPrint(BCLog::NET, "Starting newconn with %d addresses\n", vAddr.size());
+        int nTry = 0;
         for (CPAddr &addr : vAddr) 
         {
             if(!addr.IsValid() || addr.nAttempts > nAttemptLimit)
@@ -1808,8 +1809,10 @@ void CConnman::ThreadOpenConnections(const std::vector<std::string> connect)
                 //LogPrint(BCLog::NET, "Passive: newconn attempt to connect address=%s\n", addr.ToString());
                 LogAction(addr.ToString(), "tryconnect");
                 OpenNetworkConnection(addrConnect, true, &grant, nullptr);
+                nTry++;
             }
         }
+        LogPrint(BCLog::NET, "Finish newconn with %d addresses attempted\n", nTry);
         
         if (!interruptNet.sleep_for(std::chrono::milliseconds(500)))
             return;
@@ -2832,15 +2835,19 @@ uint64_t CConnman::CalculateKeyedNetGroup(const CAddress& ad) const
 
 void CConnman::ThreadReconnHandler()
 {
+    bool fSleep = true;
     while (!interruptNet)
     {
         // Sleep until the next reconn interval
-        if (!interruptNet.sleep_for(std::chrono::seconds(nReconnInterval)))
-            return;
-        
+        if(fSleep){
+            if (!interruptNet.sleep_for(std::chrono::seconds(nReconnInterval)))
+                return;
+        }
+
         std::vector<CPAddr> reconns = addrman.GetReconns();
-        LogPrint(BCLog::NET, "Passive: Starting reconn session with %d addresses\n", reconns.size());
+        LogPrint(BCLog::NET, "Starting reconn session with %d addresses\n", reconns.size());
         int64_t nTime = GetAdjustedTime();
+        int nTry = 0;
         for (CPAddr &addr : reconns)
         {
             // Too many unsuccessful attempts
@@ -2859,8 +2866,10 @@ void CConnman::ThreadReconnHandler()
 //                LogPrint(BCLog::NET, "Passive: reconn attempt to connect address=%s\n", addr.ToString());
                 LogAction(addr.ToString(), "tryreconnect");
                 OpenNetworkConnection((CAddress) addr, true, &grant, nullptr, false, false, false, true);
+                nTry++;
             }
         }
-        LogPrint(BCLog::NET, "Passive: Finished reconn session\n");
+        LogPrint(BCLog::NET, "Finished reconn session with %d addresses attempted\n", nTry);
+        fSleep = nTime - GetAdjustedTime() < nReconnInterval;
     }
 }

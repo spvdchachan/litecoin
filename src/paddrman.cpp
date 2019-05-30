@@ -66,10 +66,7 @@ bool CPAddrMan::Add_(const CAddress& addr, const CNetAddr& source, int64_t nTime
 {
     if (!addr.IsRoutable())
         return false;
-    
-    // Discovery - allow duplicates
-    LogDiscovery(addr.ToString(), source.ToString());
-     
+        
     bool fNew = false;
     CPAddr* pinfo = Find(addr.ToString());
     
@@ -98,6 +95,8 @@ bool CPAddrMan::Add_(const CAddress& addr, const CNetAddr& source, int64_t nTime
         pinfo->nTime = std::max((int64_t)0, (int64_t)pinfo->nTime - nTimePenalty);
         fNew = true;
 //        LogPrintf("Passive: discover address=%s;source=%s\n", addr.ToString(), source.ToString());
+        // Discovery 
+        LogDiscovery(addr.ToString(), source.ToString());
     }
     
     return fNew;
